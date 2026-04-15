@@ -13,80 +13,81 @@ interface Props {
   currentUserId: string
 }
 
-export default function ChatWindow({ conversationId, currentUserId }: Props) {
-  // ── Granular store selectors — only re-render when needed ─────────────────
-  const setMessages        = useChatStore((s) => s.setMessages)
-  const upsertConversation = useChatStore((s) => s.upsertConversation)
-  const setHasMore         = useChatStore((s) => s.setHasMore)
-  const setActiveId        = useChatStore((s) => s.setActiveConversationId)
-  const prependMessages    = useChatStore((s) => s.prependMessages)
-  const setLoadingMore     = useChatStore((s) => s.setLoadingMore)
+// Track fetched conversations across mounts (module-level, not per-render)
+const fetchedConversations = new Set<string>()
 
-  // These selectors are conversation-scoped — only update when THIS conv changes
-  const convMessages  = useChatStore((s) => s.messages[conversationId] ?? [])
-  const hasMore       = useChatStore((s) => s.hasMore[conversationId] ?? false)
-  const isLoadingMore = useChatStore((s) => s.loadingMore[conversationId] ?? false)
+export default function ChatWindow({ conversationId, currentUserId }: Props) {
+  // Single store call — stable action refs don't cause re-renders
+  const store = useChatStore()
+
+  const convMessages  = store.messages[conversationId] ?? []
+  const hasMore       = store.hasMore[conversationId] ?? false
+  const isLoadingMore = store.loadingMore[conversationId] ?? false
 
   const [loading, setLoading] = useState(false)
-
-  // Track whether we've already fetched this conversation in this session
-  const fetchedRef = useRef<Set<string>>(new Set())
+  const cancelRef = useRef(false)
 
   useEffect(() => {
-    setActiveId(conversationId)
+    cancelRef.current = false
+    store.setActiveConversationId(conversationId)
     subscribeToConversation(conversationId)
 
-    // Already fetched this conversation — use cached data, no spinner
-    if (fetchedRef.current.has(conversationId)) {
-      return () => setActiveId(null)
+    // Already fetched — use cached data instantly, no spinner
+    if (fetchedConversations.has(conversationId)) {
+      return () => {
+        cancelRef.current = true
+        store.setActiveConversationId(null)
+      }
     }
 
-    // Check store cache (messages already loaded from a previous mount)
-    const cached = useChatStore.getState().messages[conversationId]
-    if (cached !== undefined) {
-      fetchedRef.current.add(conversationId)
-      return () => setActiveId(null)
+    // Check if store already has messages for this conversation
+    const alreadyCached = useChatStore.getState().messages[conversationId] !== undefined
+    if (alreadyCached) {
+      fetchedConversations.add(conversationId)
+      return () => {
+        cancelRef.current = true
+        store.setActiveConversationId(null)
+      }
     }
 
-    // First time — fetch in background, show skeleton
-    fetchedRef.current.add(conversationId)
-    let cancelled = false
+    // First load — show skeleton, fetch in background
+    fetchedConversations.add(conversationId)
     setLoading(true)
 
-    ;(async () => {
-      const supabase = getSupabaseClient()
+    const supabase = getSupabaseClient()
 
-      // Parallel fetch: conversation metadata + last 30 messages
-      const [convResult, msgResult] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('*, participants(*, profile:profiles(*))')
-          .eq('id', conversationId)
-          .single(),
-        supabase
-          .from('messages')
-          .select('*, sender:profiles(*), reply_to:messages!reply_to_id(*), reactions(*)')
-          .eq('conversation_id', conversationId)
-          .not('deleted_for', 'cs', `{${currentUserId}}`)
-          .order('created_at', { ascending: false })
-          .limit(30),
-      ])
+    Promise.all([
+      supabase
+        .from('conversations')
+        .select('*, participants(*, profile:profiles(*))')
+        .eq('id', conversationId)
+        .single(),
+      supabase
+        .from('messages')
+        .select('*, sender:profiles(*), reply_to:messages!reply_to_id(*), reactions(*)')
+        .eq('conversation_id', conversationId)
+        .not('deleted_for', 'cs', `{${currentUserId}}`)
+        .order('created_at', { ascending: false })
+        .limit(30),
+    ]).then(([convResult, msgResult]) => {
+      if (cancelRef.current) return
 
-      if (cancelled) return
-
-      if (convResult.data) upsertConversation(convResult.data)
+      if (convResult.data) {
+        useChatStore.getState().upsertConversation(convResult.data)
+      }
 
       const msgs = msgResult.data ? [...msgResult.data].reverse() : []
-      setMessages(conversationId, msgs)
-      setHasMore(conversationId, msgs.length === 30)
+      useChatStore.getState().setMessages(conversationId, msgs)
+      useChatStore.getState().setHasMore(conversationId, msgs.length === 30)
       setLoading(false)
-    })()
+    }).catch(() => {
+      if (!cancelRef.current) setLoading(false)
+    })
 
     return () => {
-      cancelled = true
-      setActiveId(null)
+      cancelRef.current = true
+      store.setActiveConversationId(null)
     }
-  // conversationId is the only real dependency — all store actions are stable refs
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
 
@@ -95,7 +96,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
     const msgs = useChatStore.getState().messages[conversationId] ?? []
     if (!msgs.length) return
 
-    setLoadingMore(conversationId, true)
+    useChatStore.getState().setLoadingMore(conversationId, true)
     const supabase = getSupabaseClient()
     const oldest = msgs[0]
 
@@ -109,11 +110,11 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
       .limit(30)
 
     if (data) {
-      prependMessages(conversationId, data.reverse())
-      setHasMore(conversationId, data.length === 30)
+      useChatStore.getState().prependMessages(conversationId, data.reverse())
+      useChatStore.getState().setHasMore(conversationId, data.length === 30)
     }
-    setLoadingMore(conversationId, false)
-  }, [conversationId, isLoadingMore, hasMore, currentUserId, setLoadingMore, prependMessages, setHasMore])
+    useChatStore.getState().setLoadingMore(conversationId, false)
+  }, [conversationId, isLoadingMore, hasMore, currentUserId])
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
