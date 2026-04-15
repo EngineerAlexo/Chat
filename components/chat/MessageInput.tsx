@@ -37,6 +37,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
   const audioChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastTypingSentRef = useRef<number>(0)
 
   // Populate input when editing
   useEffect(() => {
@@ -54,15 +55,25 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
   }, [text])
 
+  // Debounced typing broadcast — max once per 500ms, works on Android
   const handleTyping = useCallback(() => {
     if (!currentUser) return
-    broadcastTyping(conversationId, {
-      user_id: currentUser.id,
-      username: currentUser.username,
-      avatar_url: currentUser.avatar_url,
-    })
+    const now = Date.now()
+    // Throttle: only send if 500ms have passed since last send
+    if (now - lastTypingSentRef.current > 500) {
+      lastTypingSentRef.current = now
+      broadcastTyping(conversationId, {
+        user_id: currentUser.id,
+        username: currentUser.username,
+        avatar_url: currentUser.avatar_url,
+      })
+    }
+    // Reset the stop-typing timer
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
-    typingTimerRef.current = setTimeout(() => {}, 3000)
+    typingTimerRef.current = setTimeout(() => {
+      // Typing stopped — nothing to broadcast (server clears after 3s)
+      typingTimerRef.current = null
+    }, 2000)
   }, [conversationId, currentUser])
 
   async function sendMessage() {
@@ -429,6 +440,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
               ref={textareaRef}
               value={text}
               onChange={(e) => { setText(e.target.value); handleTyping() }}
+              onInput={handleTyping}
               onKeyDown={handleKeyDown}
               placeholder={editingMessage ? 'Edit message...' : 'Message'}
               rows={1}

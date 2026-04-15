@@ -20,30 +20,34 @@ export function subscribeToConversation(conversationId: string) {
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-      async (payload) => {
+      (payload) => {
+        // Use payload directly — no extra fetch needed
         const msg = payload.new as Message
-        // Fetch full message with sender
-        const { data } = await supabase
-          .from('messages')
-          .select('*, sender:profiles(*), reply_to:messages!reply_to_id(*), reactions(*)')
-          .eq('id', msg.id)
-          .single()
+        const currentUser = useChatStore.getState().currentUser
+        const existing = useChatStore.getState().messages[conversationId]
 
-        if (data) {
-          const currentUser = useChatStore.getState().currentUser
-          // Don't add if it's our own optimistic message (already in store)
-          const existing = useChatStore.getState().messages[conversationId]
-          const alreadyExists = existing?.find(
-            (m) => m.id === data.id || (m.optimistic && m.content === data.content && m.sender_id === data.sender_id)
-          )
-          if (alreadyExists && alreadyExists.optimistic) {
-            useChatStore.getState().updateMessage(conversationId, alreadyExists.id, { ...data, optimistic: false, status: 'delivered' })
-          } else if (!alreadyExists) {
-            useChatStore.getState().addMessage(conversationId, { ...data, status: data.sender_id === currentUser?.id ? 'sent' : 'delivered' })
-          }
-          // Update last message in conversation list
-          useChatStore.getState().updateConversation(conversationId, { last_message: data })
+        // Match against optimistic message (same sender + content, still pending)
+        const optimistic = existing?.find(
+          (m) => m.optimistic && m.content === msg.content && m.sender_id === msg.sender_id
+        )
+
+        if (optimistic) {
+          // Replace optimistic with real message
+          useChatStore.getState().updateMessage(conversationId, optimistic.id, {
+            ...msg,
+            optimistic: false,
+            status: 'delivered',
+          })
+        } else if (!existing?.find((m) => m.id === msg.id)) {
+          // New message from another user
+          useChatStore.getState().addMessage(conversationId, {
+            ...msg,
+            status: msg.sender_id === currentUser?.id ? 'sent' : 'delivered',
+          })
         }
+
+        // Update sidebar last message
+        useChatStore.getState().updateConversation(conversationId, { last_message: msg })
       }
     )
     .on(
@@ -107,12 +111,21 @@ export function subscribeToConversation(conversationId: string) {
 }
 
 export function broadcastTyping(conversationId: string, user: { user_id: string; username: string | null; avatar_url: string | null }) {
+  // messageChannel may be null briefly on mobile — silently skip, not an error
   if (!messageChannel) return
-  messageChannel.send({
-    type: 'broadcast',
-    event: 'typing',
-    payload: { user_id: user.user_id, username: user.username, avatar_url: user.avatar_url },
-  })
+  try {
+    messageChannel.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        user_id: user.user_id,
+        username: user.username ?? '',
+        avatar_url: user.avatar_url ?? '',
+      },
+    })
+  } catch {
+    // Channel not ready yet — ignore
+  }
 }
 
 export function subscribeToPresence(currentUserId: string) {

@@ -6,7 +6,6 @@ import { useChatStore } from '@/lib/stores/useChatStore'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { Message } from '@/lib/types'
 import { formatTime } from '@/lib/utils/formatTime'
-import { shouldShowAvatar, shouldShowSenderName } from '@/lib/utils/groupMessages'
 import { cn } from '@/lib/utils/cn'
 import Avatar from '@/components/ui/Avatar'
 import VoiceMessage from './VoiceMessage'
@@ -18,15 +17,15 @@ import {
 
 interface Props {
   message: Message
-  messages: Message[]
-  index: number
+  showAvatar: boolean
+  showName: boolean
   currentUserId: string
   conversationId: string
 }
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
 
-const MessageBubble = memo(function MessageBubble({ message, messages, index, currentUserId, conversationId }: Props) {
+const MessageBubble = memo(function MessageBubble({ message, showAvatar, showName, currentUserId, conversationId }: Props) {
   const { setReplyTo, setEditingMessage, updateMessage, removeMessage } = useChatStore()
   const [showActions, setShowActions] = useState(false)
   const [showEmojiQuick, setShowEmojiQuick] = useState(false)
@@ -34,8 +33,6 @@ const MessageBubble = memo(function MessageBubble({ message, messages, index, cu
   const longPressTimer = useRef<NodeJS.Timeout | null>(null)
 
   const isOwn = message.sender_id === currentUserId
-  const showAvatar = shouldShowAvatar(messages, index)
-  const showName = !isOwn && shouldShowSenderName(messages, index)
   const isDeleted = message.deleted_for?.includes(currentUserId)
 
   if (isDeleted) return null

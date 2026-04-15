@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { Message } from '@/lib/types'
 import { groupMessagesByDate } from '@/lib/utils/groupMessages'
+import { shouldShowAvatar, shouldShowSenderName } from '@/lib/utils/groupMessages'
 import MessageBubble from './MessageBubble'
 import { Loader2, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
@@ -26,16 +27,30 @@ export default function MessageList({ conversationId, messages, currentUserId, o
   const initialScrollDone = useRef(false)
   isLoadingMoreRef.current = isLoadingMore
 
-  // Flatten messages for virtualizer
-  const groups = groupMessagesByDate(messages)
-  const flatItems: Array<{ type: 'date'; label: string } | { type: 'message'; message: Message; index: number }> = []
-  let msgIndex = 0
-  for (const group of groups) {
-    flatItems.push({ type: 'date', label: group.date })
-    for (const msg of group.messages) {
-      flatItems.push({ type: 'message', message: msg, index: msgIndex++ })
+  // Memoize flat items — only recompute when messages array changes
+  const flatItems = useMemo(() => {
+    const groups = groupMessagesByDate(messages)
+    const items: Array<
+      | { type: 'date'; label: string }
+      | { type: 'message'; message: Message; index: number; showAvatar: boolean; showName: boolean }
+    > = []
+    let msgIndex = 0
+    for (const group of groups) {
+      items.push({ type: 'date', label: group.date })
+      for (const msg of group.messages) {
+        const idx = msgIndex
+        items.push({
+          type: 'message',
+          message: msg,
+          index: idx,
+          showAvatar: shouldShowAvatar(messages, idx),
+          showName: msg.sender_id !== currentUserId && shouldShowSenderName(messages, idx),
+        })
+        msgIndex++
+      }
     }
-  }
+    return items
+  }, [messages, currentUserId])
 
   const virtualizer = useVirtualizer({
     count: flatItems.length,
@@ -152,8 +167,8 @@ export default function MessageList({ conversationId, messages, currentUserId, o
                 ) : (
                   <MessageBubble
                     message={item.message}
-                    messages={messages}
-                    index={item.index}
+                    showAvatar={item.showAvatar}
+                    showName={item.showName}
                     currentUserId={currentUserId}
                     conversationId={conversationId}
                   />
