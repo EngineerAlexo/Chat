@@ -14,18 +14,11 @@ interface Props {
 }
 
 export default function ChatWindow({ conversationId, currentUserId }: Props) {
-  const messages     = useChatStore((s) => s.messages)
-  const hasMoreMap   = useChatStore((s) => s.hasMore)
-  const loadingMap   = useChatStore((s) => s.loadingMore)
+  const convMessages  = useChatStore((s) => s.messages?.[conversationId] ?? [])
+  const hasMore       = useChatStore((s) => s.hasMore?.[conversationId] ?? false)
+  const isLoadingMore = useChatStore((s) => s.loadingMore?.[conversationId] ?? false)
 
-  const convMessages  = messages[conversationId] ?? []
-  const hasMore       = hasMoreMap[conversationId] ?? false
-  const isLoadingMore = loadingMap[conversationId] ?? false
-
-  const [loading, setLoading] = useState(() => {
-    // Initialize loading=false if we already have cached messages
-    return useChatStore.getState().messages[conversationId] === undefined
-  })
+  const [loading, setLoading] = useState(true)
 
   const didFetch = useRef(false)
 
