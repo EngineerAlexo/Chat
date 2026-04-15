@@ -155,7 +155,7 @@ export default function ChatSidebar() {
     <>
       <motion.aside
         initial={false}
-        className="flex flex-col h-full border-r border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary flex-shrink-0 w-[320px] md:w-[360px]"
+        className="flex flex-col h-full border-r border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary flex-shrink-0 w-full md:w-[360px]"
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-3 border-b border-tg-border dark:border-tg-border-dark">

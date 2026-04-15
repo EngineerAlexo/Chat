@@ -17,6 +17,7 @@ export interface Conversation {
   id: string
   name: string | null
   type: ConversationType
+  avatar_url?: string | null
   created_at: string
   // joined from participants + profiles
   participants?: Participant[]
