@@ -70,8 +70,8 @@ export default function ChatWindow({ conversationId, initialConversation, initia
       {/* Header — fixed height */}
       <ChatHeader conversationId={conversationId} currentUserId={currentUserId} />
 
-      {/* Messages — takes all remaining space, scrollable */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      {/* Messages — takes all remaining space, scrollable with momentum */}
+      <div className="messages-scroll">
         <MessageList
           conversationId={conversationId}
           messages={convMessages}
