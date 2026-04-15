@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-blue: #2AABEE;
+  --tg-bg: #ffffff;
+  --tg-sidebar: #f4f4f5;
+  --tg-border: #e4e4e7;
+  --tg-text: #000000;
+  --tg-text-secondary: #707579;
+  --tg-bubble-out: #effdde;
+  --tg-bubble-in: #ffffff;
+}
+
+.dark {
+  --tg-bg: #17212b;
+  --tg-sidebar: #232e3c;
+  --tg-border: #2b3a4a;
+  --tg-text: #ffffff;
+  --tg-text-secondary: #8d9ba8;
+  --tg-bubble-out: #2b5278;
+  --tg-bubble-in: #182533;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* Message bubble tail */
+.bubble-out::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: -6px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--tg-bubble-out);
+  border-bottom: 6px solid transparent;
+}
+
+.bubble-in::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-right: 6px solid var(--tg-bubble-in);
+  border-bottom: 6px solid transparent;
+}
+
+/* Typing animation */
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Waveform bars */
+.waveform-bar {
+  display: inline-block;
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: height 0.1s ease;
+}
+
+/* Emoji picker override */
+.EmojiPickerReact {
+  --epr-bg-color: var(--tg-bg) !important;
+  --epr-category-label-bg-color: var(--tg-bg) !important;
+  --epr-text-color: var(--tg-text) !important;
+  --epr-search-border-color: var(--tg-border) !important;
+  border: 1px solid var(--tg-border) !important;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.16) !important;
+}
+
+/* Smooth transitions */
+.transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* Selection */
+::selection { background: rgba(42, 171, 238, 0.3); }
