@@ -336,7 +336,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
         )}
       </AnimatePresence>
 
-      <div className="border-t border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary px-2 md:px-3 py-2 w-full">
+      <div className="border-t border-tg-border dark:border-tg-border-dark glass px-2 md:px-3 py-2 w-full input-bar">
         {/* Reply/Edit bar */}
         <AnimatePresence>
           {(replyTo || editingMessage) && (
@@ -449,7 +449,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
               onKeyDown={handleKeyDown}
               placeholder={editingMessage ? 'Edit message...' : 'Message'}
               rows={1}
-              className="flex-1 min-w-0 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-3 py-2 md:px-4 md:py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition max-h-32 md:max-h-40 leading-relaxed"
+              className="flex-1 min-w-0 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-3 py-2 md:px-4 md:py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition textarea-smooth max-h-32 md:max-h-40 leading-relaxed"
             />
 
             <button
@@ -462,21 +462,23 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
             {canSend ? (
               <motion.button
                 key="send"
-                initial={{ scale: 0.8 }}
-                animate={{ scale: 1 }}
+                initial={{ scale: 0.7, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                 onClick={sendMessage}
                 disabled={uploading}
-                className="flex-shrink-0 w-9 h-9 rounded-full bg-tg-blue hover:bg-tg-blue-dark text-white flex items-center justify-center transition active:scale-95"
+                className="flex-shrink-0 w-9 h-9 rounded-full bg-tg-blue hover:bg-tg-blue-dark text-white flex items-center justify-center transition touch-feedback active:scale-90"
               >
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </motion.button>
             ) : (
               <motion.button
                 key="mic"
-                initial={{ scale: 0.8 }}
-                animate={{ scale: 1 }}
+                initial={{ scale: 0.7, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 20 }}
                 onClick={startRecording}
-                className="flex-shrink-0 w-9 h-9 rounded-full bg-tg-blue hover:bg-tg-blue-dark text-white flex items-center justify-center transition active:scale-95"
+                className="flex-shrink-0 w-9 h-9 rounded-full bg-tg-blue hover:bg-tg-blue-dark text-white flex items-center justify-center transition touch-feedback active:scale-90"
               >
                 <Mic className="w-4 h-4" />
               </motion.button>

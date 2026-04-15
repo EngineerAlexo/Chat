@@ -89,7 +89,7 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
 
   return (
     <>
-      <div className="flex items-center gap-2 px-3 py-2 md:py-3 border-b border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary flex-shrink-0 shadow-sm">
+      <div className="flex items-center gap-2 px-3 py-2 md:py-3 border-b border-tg-border dark:border-tg-border-dark glass flex-shrink-0 shadow-sm chat-header">
         {/* Sidebar toggle */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -162,7 +162,7 @@ function HeaderBtn({ icon, onClick, title }: { icon: React.ReactNode; onClick?: 
     <button
       onClick={onClick}
       title={title}
-      className="w-8 h-8 rounded-full flex items-center justify-center text-tg-text-secondary hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark hover:text-gray-700 dark:hover:text-gray-300 transition"
+      className="w-8 h-8 rounded-full flex items-center justify-center text-tg-text-secondary hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark hover:text-gray-700 dark:hover:text-gray-300 transition touch-feedback"
     >
       {icon}
     </button>

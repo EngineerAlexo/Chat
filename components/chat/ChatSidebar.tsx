@@ -390,7 +390,7 @@ function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }:
       animate={{ opacity: 1 }}
       onClick={onClick}
       className={cn(
-        'w-full flex items-center gap-3 px-3 py-2 md:py-3 transition-colors text-left border-b border-tg-border/30 dark:border-tg-border-dark/30',
+        'w-full flex items-center gap-3 px-3 py-2 md:py-3 transition-colors text-left border-b border-tg-border/30 dark:border-tg-border-dark/30 touch-feedback conv-item',
         isActive
           ? 'bg-tg-blue/10 dark:bg-tg-blue/20'
           : 'hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark'

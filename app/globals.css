@@ -156,3 +156,157 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* Hide scrollbar on nav pills */
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FLUID UI — Buttery smooth animations, spring physics, GPU-accelerated
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Skeleton shimmer ───────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(0,0,0,0.06) 25%,
+    rgba(0,0,0,0.12) 37%,
+    rgba(0,0,0,0.06) 63%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  will-change: background-position;
+}
+
+.dark .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 37%,
+    rgba(255,255,255,0.04) 63%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ─── GPU-accelerated base for all animated elements ────────────────────── */
+/* Only transform + opacity — never animate layout properties               */
+.chat-header,
+.message-bubble,
+.input-bar,
+.conv-item {
+  will-change: transform;
+  transform: translateZ(0);   /* force GPU layer */
+  backface-visibility: hidden;
+}
+
+/* ─── Glassmorphism header + input bar ───────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+}
+
+.dark .glass {
+  background: rgba(35, 46, 60, 0.88);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+}
+
+/* ─── Touch feedback — instant scale on press ───────────────────────────── */
+/* Applied to buttons and conversation items                                 */
+.touch-feedback {
+  transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity   120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.touch-feedback:active {
+  transform: scale(0.96) translateZ(0);
+  opacity: 0.85;
+}
+
+/* ─── Message bubble spring entrance ────────────────────────────────────── */
+@keyframes bubble-in-right {
+  from { opacity: 0; transform: translateX(12px) scale(0.95) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)    scale(1)    translateZ(0); }
+}
+
+@keyframes bubble-in-left {
+  from { opacity: 0; transform: translateX(-12px) scale(0.95) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)     scale(1)    translateZ(0); }
+}
+
+.bubble-enter-right {
+  animation: bubble-in-right 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+.bubble-enter-left {
+  animation: bubble-in-left 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* ─── Conversation list item slide-in ───────────────────────────────────── */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-8px) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)    translateZ(0); }
+}
+
+.conv-item-enter {
+  animation: slide-in-left 180ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* ─── Smooth textarea height transition ─────────────────────────────────── */
+.textarea-smooth {
+  transition: height 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: height;
+}
+
+/* ─── Send button spring pop ─────────────────────────────────────────────── */
+@keyframes btn-pop {
+  0%   { transform: scale(0.7) translateZ(0); opacity: 0; }
+  70%  { transform: scale(1.1) translateZ(0); opacity: 1; }
+  100% { transform: scale(1)   translateZ(0); opacity: 1; }
+}
+
+.btn-pop {
+  animation: btn-pop 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* ─── Smooth page transitions ────────────────────────────────────────────── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateX(16px) translateZ(0); }
+  to   { opacity: 1; transform: translateX(0)    translateZ(0); }
+}
+
+.page-enter {
+  animation: page-enter 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* ─── Reaction pop ───────────────────────────────────────────────────────── */
+@keyframes reaction-pop {
+  0%   { transform: scale(0) translateZ(0); }
+  60%  { transform: scale(1.2) translateZ(0); }
+  100% { transform: scale(1) translateZ(0); }
+}
+
+.reaction-pop {
+  animation: reaction-pop 250ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform;
+}
+
+/* ─── Smooth scroll behavior ─────────────────────────────────────────────── */
+.messages-scroll {
+  scroll-behavior: smooth;
+}
+
+/* ─── Prevent layout thrash on animated elements ────────────────────────── */
+.no-layout-thrash {
+  contain: layout style;
+}

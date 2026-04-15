@@ -13,47 +13,46 @@ interface Props {
   currentUserId: string
 }
 
-// Track fetched conversations across mounts (module-level, not per-render)
-const fetchedConversations = new Set<string>()
-
 export default function ChatWindow({ conversationId, currentUserId }: Props) {
-  // Single store call — stable action refs don't cause re-renders
-  const store = useChatStore()
+  const messages     = useChatStore((s) => s.messages)
+  const hasMoreMap   = useChatStore((s) => s.hasMore)
+  const loadingMap   = useChatStore((s) => s.loadingMore)
 
-  const convMessages  = store.messages[conversationId] ?? []
-  const hasMore       = store.hasMore[conversationId] ?? false
-  const isLoadingMore = store.loadingMore[conversationId] ?? false
+  const convMessages  = messages[conversationId] ?? []
+  const hasMore       = hasMoreMap[conversationId] ?? false
+  const isLoadingMore = loadingMap[conversationId] ?? false
 
-  const [loading, setLoading] = useState(false)
-  const cancelRef = useRef(false)
+  const [loading, setLoading] = useState(() => {
+    // Initialize loading=false if we already have cached messages
+    return useChatStore.getState().messages[conversationId] === undefined
+  })
+
+  const didFetch = useRef(false)
 
   useEffect(() => {
-    cancelRef.current = false
-    store.setActiveConversationId(conversationId)
+    // Reset on conversation change
+    didFetch.current = false
+    const hasCached = useChatStore.getState().messages[conversationId] !== undefined
+    if (hasCached) {
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+  }, [conversationId])
+
+  useEffect(() => {
+    if (didFetch.current) return
+    didFetch.current = true
+
+    useChatStore.getState().setActiveConversationId(conversationId)
     subscribeToConversation(conversationId)
 
-    // Already fetched — use cached data instantly, no spinner
-    if (fetchedConversations.has(conversationId)) {
-      return () => {
-        cancelRef.current = true
-        store.setActiveConversationId(null)
-      }
+    // Already have data — nothing to fetch
+    if (useChatStore.getState().messages[conversationId] !== undefined) {
+      return () => useChatStore.getState().setActiveConversationId(null)
     }
 
-    // Check if store already has messages for this conversation
-    const alreadyCached = useChatStore.getState().messages[conversationId] !== undefined
-    if (alreadyCached) {
-      fetchedConversations.add(conversationId)
-      return () => {
-        cancelRef.current = true
-        store.setActiveConversationId(null)
-      }
-    }
-
-    // First load — show skeleton, fetch in background
-    fetchedConversations.add(conversationId)
-    setLoading(true)
-
+    let active = true
     const supabase = getSupabaseClient()
 
     Promise.all([
@@ -69,24 +68,20 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
         .not('deleted_for', 'cs', `{${currentUserId}}`)
         .order('created_at', { ascending: false })
         .limit(30),
-    ]).then(([convResult, msgResult]) => {
-      if (cancelRef.current) return
-
-      if (convResult.data) {
-        useChatStore.getState().upsertConversation(convResult.data)
-      }
-
-      const msgs = msgResult.data ? [...msgResult.data].reverse() : []
-      useChatStore.getState().setMessages(conversationId, msgs)
-      useChatStore.getState().setHasMore(conversationId, msgs.length === 30)
-      setLoading(false)
-    }).catch(() => {
-      if (!cancelRef.current) setLoading(false)
-    })
+    ])
+      .then(([convRes, msgRes]) => {
+        if (!active) return
+        if (convRes.data) useChatStore.getState().upsertConversation(convRes.data)
+        const msgs = msgRes.data ? [...msgRes.data].reverse() : []
+        useChatStore.getState().setMessages(conversationId, msgs)
+        useChatStore.getState().setHasMore(conversationId, msgs.length === 30)
+        setLoading(false)
+      })
+      .catch(() => { if (active) setLoading(false) })
 
     return () => {
-      cancelRef.current = true
-      store.setActiveConversationId(null)
+      active = false
+      useChatStore.getState().setActiveConversationId(null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId])
@@ -98,13 +93,12 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
 
     useChatStore.getState().setLoadingMore(conversationId, true)
     const supabase = getSupabaseClient()
-    const oldest = msgs[0]
 
     const { data } = await supabase
       .from('messages')
       .select('*, sender:profiles(*), reply_to:messages!reply_to_id(*), reactions(*)')
       .eq('conversation_id', conversationId)
-      .lt('created_at', oldest.created_at)
+      .lt('created_at', msgs[0].created_at)
       .not('deleted_for', 'cs', `{${currentUserId}}`)
       .order('created_at', { ascending: false })
       .limit(30)
@@ -141,28 +135,23 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
   )
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
-const SKELETON_ITEMS = [
-  { own: false, w: 'w-48' },
-  { own: true,  w: 'w-36' },
-  { own: false, w: 'w-64' },
-  { own: false, w: 'w-40' },
-  { own: true,  w: 'w-52' },
-  { own: true,  w: 'w-28' },
+// ─── Skeleton shimmer ─────────────────────────────────────────────────────────
+const SKELETON_ROWS = [
+  { own: false, w: 'w-48' }, { own: true, w: 'w-36' },
+  { own: false, w: 'w-64' }, { own: false, w: 'w-40' },
+  { own: true,  w: 'w-52' }, { own: true,  w: 'w-28' },
   { own: false, w: 'w-56' },
 ] as const
 
 function MessageSkeleton() {
   return (
     <div className="flex flex-col gap-3 px-3 py-4 h-full bg-tg-bg-secondary dark:bg-tg-bg-dark-tertiary overflow-hidden">
-      {SKELETON_ITEMS.map((item, i) => (
-        <div key={i} className={`flex ${item.own ? 'justify-end' : 'justify-start'}`}>
-          {!item.own && (
-            <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse mr-2 flex-shrink-0 self-end" />
+      {SKELETON_ROWS.map((row, i) => (
+        <div key={i} className={`flex ${row.own ? 'justify-end' : 'justify-start'} items-end gap-2`}>
+          {!row.own && (
+            <div className="w-6 h-6 rounded-full skeleton-shimmer flex-shrink-0" />
           )}
-          <div className={`h-9 rounded-2xl animate-pulse ${item.w} ${
-            item.own ? 'bg-tg-blue/20 dark:bg-tg-blue/30' : 'bg-gray-200 dark:bg-gray-700'
-          }`} />
+          <div className={`h-9 rounded-2xl skeleton-shimmer ${row.w}`} />
         </div>
       ))}
     </div>
