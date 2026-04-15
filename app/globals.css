@@ -27,7 +27,25 @@
 
 html, body {
   height: 100%;
-  overflow: hidden;
+  /* overflow: hidden breaks mobile keyboard — removed */
+}
+
+/* On desktop only, prevent body scroll */
+@media (min-width: 768px) {
+  html, body { overflow: hidden; }
+}
+
+/* Mobile: use dynamic viewport height so keyboard doesn't hide input */
+@supports (height: 100dvh) {
+  .h-screen-mobile { height: 100dvh; }
+}
+@supports not (height: 100dvh) {
+  .h-screen-mobile { height: 100vh; }
+}
+
+/* Safe area padding for Android notch / nav bar */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 body {

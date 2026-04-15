@@ -66,16 +66,25 @@ export default function ChatWindow({ conversationId, initialConversation, initia
   const convMessages = messages[conversationId] ?? []
 
   return (
-    <div className="flex flex-col flex-1 h-full overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      {/* Header — fixed height */}
       <ChatHeader conversationId={conversationId} currentUserId={currentUserId} />
-      <MessageList
-        conversationId={conversationId}
-        messages={convMessages}
-        currentUserId={currentUserId}
-        onLoadMore={loadMore}
-        isLoadingMore={loadingMore[conversationId] ?? false}
-      />
-      <MessageInput conversationId={conversationId} currentUserId={currentUserId} />
+
+      {/* Messages — takes all remaining space, scrollable */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <MessageList
+          conversationId={conversationId}
+          messages={convMessages}
+          currentUserId={currentUserId}
+          onLoadMore={loadMore}
+          isLoadingMore={loadingMore[conversationId] ?? false}
+        />
+      </div>
+
+      {/* Input — always at bottom, never hidden by keyboard */}
+      <div className="flex-shrink-0 pb-safe">
+        <MessageInput conversationId={conversationId} currentUserId={currentUserId} />
+      </div>
     </div>
   )
 }

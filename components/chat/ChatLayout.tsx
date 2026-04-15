@@ -61,13 +61,11 @@ export default function ChatLayout({ children, initialProfile }: Props) {
   }, [pathname, setSidebarOpen])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-tg-bg dark:bg-tg-bg-dark">
+    <div className="flex h-screen md:h-screen h-[100dvh] overflow-hidden bg-tg-bg dark:bg-tg-bg-dark">
       {/* Sidebar: full screen on mobile when open, fixed width on desktop */}
       <div className={cn(
         'flex-shrink-0 h-full',
-        // Mobile: full width when sidebar open, hidden when in chat
         sidebarOpen ? 'w-full md:w-[360px]' : 'hidden md:block md:w-[360px]',
-        // On desktop always show sidebar
         'md:block'
       )}>
         <ChatSidebar />
