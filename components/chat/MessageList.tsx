@@ -128,7 +128,7 @@ export default function MessageList({ conversationId, messages, currentUserId, o
 
       <div
         ref={parentRef}
-        className="h-full overflow-y-auto px-4 py-2 relative"
+        className="h-full overflow-y-auto px-2 md:px-4 py-2 relative overflow-x-hidden"
       >
         {/* Loading more indicator */}
         <AnimatePresence>

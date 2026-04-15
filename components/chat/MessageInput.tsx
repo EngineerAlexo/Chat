@@ -331,7 +331,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
         )}
       </AnimatePresence>
 
-      <div className="border-t border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary px-3 py-2">
+      <div className="border-t border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary px-2 md:px-3 py-2">
         {/* Reply/Edit bar */}
         <AnimatePresence>
           {(replyTo || editingMessage) && (
@@ -444,7 +444,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
               onKeyDown={handleKeyDown}
               placeholder={editingMessage ? 'Edit message...' : 'Message'}
               rows={1}
-              className="flex-1 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-4 py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition max-h-40 leading-relaxed"
+              className="flex-1 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-3 py-2 md:px-4 md:py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition max-h-32 md:max-h-40 leading-relaxed"
             />
 
             <button

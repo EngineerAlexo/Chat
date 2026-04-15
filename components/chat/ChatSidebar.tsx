@@ -390,7 +390,7 @@ function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }:
       animate={{ opacity: 1 }}
       onClick={onClick}
       className={cn(
-        'w-full flex items-center gap-3 px-3 py-3 transition-colors text-left border-b border-tg-border/30 dark:border-tg-border-dark/30',
+        'w-full flex items-center gap-3 px-3 py-2 md:py-3 transition-colors text-left border-b border-tg-border/30 dark:border-tg-border-dark/30',
         isActive
           ? 'bg-tg-blue/10 dark:bg-tg-blue/20'
           : 'hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark'
@@ -399,19 +399,19 @@ function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }:
       {/* Avatar */}
       <div className="flex-shrink-0">
         {conv.type === 'saved' ? (
-          <div className="w-12 h-12 rounded-full bg-tg-blue flex items-center justify-center">
-            <Bookmark className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-tg-blue flex items-center justify-center">
+            <Bookmark className="w-4 h-4 md:w-5 md:h-5 text-white" />
           </div>
         ) : conv.type === 'group' ? (
-          <div className="w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center">
-            <Users className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-purple-500 flex items-center justify-center">
+            <Users className="w-4 h-4 md:w-5 md:h-5 text-white" />
           </div>
         ) : conv.type === 'channel' ? (
-          <div className="w-12 h-12 rounded-full bg-orange-500 flex items-center justify-center">
-            <Radio className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-orange-500 flex items-center justify-center">
+            <Radio className="w-4 h-4 md:w-5 md:h-5 text-white" />
           </div>
         ) : (
-          <Avatar src={avatar} name={name} size={48} online={isOnline} />
+          <Avatar src={avatar} name={name} size={40} online={isOnline} />
         )}
       </div>
 

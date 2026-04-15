@@ -89,48 +89,47 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
 
   return (
     <>
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary flex-shrink-0 shadow-sm">
+      <div className="flex items-center gap-2 px-3 py-2 md:py-3 border-b border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary flex-shrink-0 shadow-sm">
         {/* Sidebar toggle */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="text-tg-text-secondary hover:text-gray-700 dark:hover:text-gray-300 flex-shrink-0"
+          className="text-tg-text-secondary hover:text-gray-700 dark:hover:text-gray-300 flex-shrink-0 w-8 h-8 flex items-center justify-center"
           title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
           <ArrowLeft className={cn('w-5 h-5 transition-transform', !sidebarOpen && 'rotate-180')} />
         </button>
 
-        {/* Avatar */}
+        {/* Avatar — smaller on mobile */}
         <div className="flex-shrink-0">
           {conv?.type === 'saved' ? (
-            <div className="w-10 h-10 rounded-full bg-tg-blue flex items-center justify-center">
-              <Bookmark className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-tg-blue flex items-center justify-center">
+              <Bookmark className="w-4 h-4 md:w-5 md:h-5 text-white" />
             </div>
           ) : conv?.type === 'group' ? (
             avatar
-              ? <Avatar src={avatar} name={name} size={40} />
-              : <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center"><Users className="w-5 h-5 text-white" /></div>
+              ? <Avatar src={avatar} name={name} size={32} className="md:!w-10 md:!h-10" />
+              : <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-purple-500 flex items-center justify-center"><Users className="w-4 h-4 text-white" /></div>
           ) : conv?.type === 'channel' ? (
             avatar
-              ? <Avatar src={avatar} name={name} size={40} />
-              : <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center"><Radio className="w-5 h-5 text-white" /></div>
+              ? <Avatar src={avatar} name={name} size={32} className="md:!w-10 md:!h-10" />
+              : <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-orange-500 flex items-center justify-center"><Radio className="w-4 h-4 text-white" /></div>
           ) : (
-            <Avatar src={avatar} name={name} size={40} online={isOnline} />
+            <Avatar src={avatar} name={name} size={32} online={isOnline} className="md:!w-10 md:!h-10" />
           )}
         </div>
 
         {/* Name + subtitle */}
         <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</h2>
-          <p className={cn('text-xs truncate transition-all', typingText ? 'text-tg-blue' : isOnline ? 'text-tg-green' : 'text-tg-text-secondary')}>
+          <h2 className="font-semibold text-gray-900 dark:text-white text-sm truncate leading-tight">{name}</h2>
+          <p className={cn('text-xs truncate transition-all leading-tight', typingText ? 'text-tg-blue' : isOnline ? 'text-tg-green' : 'text-tg-text-secondary')}>
             {typingText ? (
               <span className="flex items-center gap-1">{typingText}<TypingDots /></span>
             ) : subtitle}
           </p>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-1">
-          {/* Audio/video only for private chats */}
+        {/* Action buttons — tighter on mobile */}
+        <div className="flex items-center gap-0 md:gap-1">
           {conv?.type === 'private' && (
             <>
               <HeaderBtn icon={<Phone className="w-4 h-4" />} onClick={handleAudioCall} title="Audio call" />
@@ -138,7 +137,6 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
             </>
           )}
           <HeaderBtn icon={<Search className="w-4 h-4" />} title="Search" />
-          {/* Edit for group/channel admins */}
           {(conv?.type === 'group' || conv?.type === 'channel') && isAdmin && (
             <HeaderBtn icon={<Pencil className="w-4 h-4" />} onClick={() => setShowEdit(true)} title="Edit info" />
           )}

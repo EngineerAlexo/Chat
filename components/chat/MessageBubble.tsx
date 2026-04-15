@@ -96,7 +96,7 @@ const MessageBubble = memo(function MessageBubble({ message, showAvatar, showNam
         initial={{ opacity: 0, y: 8, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.15, ease: 'easeOut' }}
-        className={cn('flex items-end gap-2 mb-1 group', isOwn ? 'flex-row-reverse' : 'flex-row')}
+        className={cn('flex items-end gap-1 md:gap-2 mb-1 group', isOwn ? 'flex-row-reverse' : 'flex-row')}
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
         onMouseDown={handleLongPress}
@@ -106,14 +106,14 @@ const MessageBubble = memo(function MessageBubble({ message, showAvatar, showNam
         onMouseEnter={() => setShowActions(true)}
         onMouseLeave={() => { setShowActions(false); setShowEmojiQuick(false) }}
       >
-        {/* Avatar */}
-        <div className="w-8 flex-shrink-0">
+        {/* Avatar — smaller on mobile */}
+        <div className="w-6 md:w-8 flex-shrink-0">
           {!isOwn && showAvatar && (
-            <Avatar src={message.sender?.avatar_url} name={message.sender?.username ?? 'U'} size={32} />
+            <Avatar src={message.sender?.avatar_url} name={message.sender?.username ?? 'U'} size={24} className="md:!w-8 md:!h-8" />
           )}
         </div>
 
-        <div className={cn('flex flex-col max-w-[70%] relative', isOwn ? 'items-end' : 'items-start')}>
+        <div className={cn('flex flex-col max-w-[82%] md:max-w-[70%] relative', isOwn ? 'items-end' : 'items-start')}>
           {/* Sender name */}
           {showName && (
             <span className="text-xs font-medium text-tg-blue mb-1 ml-3">
