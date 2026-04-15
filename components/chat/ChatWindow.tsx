@@ -14,23 +14,22 @@ interface Props {
 }
 
 export default function ChatWindow({ conversationId, currentUserId }: Props) {
-  const convMessages  = useChatStore((s) => s.messages?.[conversationId] ?? [])
-  const hasMore       = useChatStore((s) => s.hasMore?.[conversationId] ?? false)
-  const isLoadingMore = useChatStore((s) => s.loadingMore?.[conversationId] ?? false)
+  // Read everything from store in one call — safe on SSR
+  const store = useChatStore()
+
+  // Safe reads with fallbacks — never crash even if store isn't hydrated
+  const convMessages  = (store.messages  && store.messages[conversationId])  ?? []
+  const hasMore       = (store.hasMore   && store.hasMore[conversationId])   ?? false
+  const isLoadingMore = (store.loadingMore && store.loadingMore[conversationId]) ?? false
 
   const [loading, setLoading] = useState(true)
-
   const didFetch = useRef(false)
 
+  // Reset when conversation changes
   useEffect(() => {
-    // Reset on conversation change
     didFetch.current = false
-    const hasCached = useChatStore.getState().messages[conversationId] !== undefined
-    if (hasCached) {
-      setLoading(false)
-    } else {
-      setLoading(true)
-    }
+    const cached = useChatStore.getState().messages
+    setLoading(!cached || cached[conversationId] === undefined)
   }, [conversationId])
 
   useEffect(() => {
@@ -40,8 +39,10 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
     useChatStore.getState().setActiveConversationId(conversationId)
     subscribeToConversation(conversationId)
 
-    // Already have data — nothing to fetch
-    if (useChatStore.getState().messages[conversationId] !== undefined) {
+    // Already cached — show immediately
+    const cached = useChatStore.getState().messages
+    if (cached && cached[conversationId] !== undefined) {
+      setLoading(false)
       return () => useChatStore.getState().setActiveConversationId(null)
     }
 
@@ -81,7 +82,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
 
   const loadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) return
-    const msgs = useChatStore.getState().messages[conversationId] ?? []
+    const msgs = useChatStore.getState().messages?.[conversationId] ?? []
     if (!msgs.length) return
 
     useChatStore.getState().setLoadingMore(conversationId, true)
@@ -130,7 +131,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
 
 // ─── Skeleton shimmer ─────────────────────────────────────────────────────────
 const SKELETON_ROWS = [
-  { own: false, w: 'w-48' }, { own: true, w: 'w-36' },
+  { own: false, w: 'w-48' }, { own: true,  w: 'w-36' },
   { own: false, w: 'w-64' }, { own: false, w: 'w-40' },
   { own: true,  w: 'w-52' }, { own: true,  w: 'w-28' },
   { own: false, w: 'w-56' },
@@ -141,9 +142,7 @@ function MessageSkeleton() {
     <div className="flex flex-col gap-3 px-3 py-4 h-full bg-tg-bg-secondary dark:bg-tg-bg-dark-tertiary overflow-hidden">
       {SKELETON_ROWS.map((row, i) => (
         <div key={i} className={`flex ${row.own ? 'justify-end' : 'justify-start'} items-end gap-2`}>
-          {!row.own && (
-            <div className="w-6 h-6 rounded-full skeleton-shimmer flex-shrink-0" />
-          )}
+          {!row.own && <div className="w-6 h-6 rounded-full skeleton-shimmer flex-shrink-0" />}
           <div className={`h-9 rounded-2xl skeleton-shimmer ${row.w}`} />
         </div>
       ))}
