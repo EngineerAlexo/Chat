@@ -39,6 +39,11 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const lastTypingSentRef = useRef<number>(0)
 
+  // Trigger layout recalc on mount — fixes thin input on first render (Android)
+  useEffect(() => {
+    window.dispatchEvent(new Event('resize'))
+  }, [])
+
   // Populate input when editing
   useEffect(() => {
     if (editingMessage) {
@@ -283,7 +288,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
   const canSend = text.trim().length > 0 || !!mediaPreview
 
   return (
-    <div {...getRootProps()} className="relative flex-shrink-0">
+    <div {...getRootProps()} className="relative flex-shrink-0 w-full">
       <input {...getInputProps()} />
 
       {/* Drag overlay */}
@@ -331,7 +336,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
         )}
       </AnimatePresence>
 
-      <div className="border-t border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary px-2 md:px-3 py-2">
+      <div className="border-t border-tg-border dark:border-tg-border-dark bg-white dark:bg-tg-bg-dark-secondary px-2 md:px-3 py-2 w-full">
         {/* Reply/Edit bar */}
         <AnimatePresence>
           {(replyTo || editingMessage) && (
@@ -444,7 +449,7 @@ export default function MessageInput({ conversationId, currentUserId }: Props) {
               onKeyDown={handleKeyDown}
               placeholder={editingMessage ? 'Edit message...' : 'Message'}
               rows={1}
-              className="flex-1 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-3 py-2 md:px-4 md:py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition max-h-32 md:max-h-40 leading-relaxed"
+              className="flex-1 min-w-0 resize-none bg-tg-bg-secondary dark:bg-tg-bg-dark rounded-2xl px-3 py-2 md:px-4 md:py-2.5 text-sm text-gray-900 dark:text-white placeholder-tg-text-secondary focus:outline-none focus:ring-2 focus:ring-tg-blue/50 transition max-h-32 md:max-h-40 leading-relaxed"
             />
 
             <button

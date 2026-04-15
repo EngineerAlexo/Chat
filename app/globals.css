@@ -70,6 +70,11 @@ body {
   overscroll-behavior-y: contain;
 }
 
+/* Extra bottom padding so messages don't hide behind input bar */
+.messages-scroll > * {
+  padding-bottom: 8px;
+}
+
 /* ─── Safe area (Android nav bar / iPhone notch) ─────────────────────────── */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
