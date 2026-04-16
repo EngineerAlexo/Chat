@@ -71,9 +71,8 @@ export function subscribeToConversation(conversationId: string) {
               icon: sender?.profile?.avatar_url ?? '/icons/icon-192.png',
               badge: '/icons/icon-192.png',
               tag: conversationId,
-              renotify: true,
               data: { conversationId },
-            }).catch(() => {})
+            } as NotificationOptions).catch(() => {})
           }).catch(() => {})
         }
       }

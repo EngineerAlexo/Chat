@@ -162,7 +162,6 @@ export async function sendLocalNotification(opts: {
     icon: opts.icon ?? '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     tag: opts.conversationId ?? 'chat',
-    renotify: true,
     data: { conversationId: opts.conversationId },
-  })
+  } as NotificationOptions)
 }
