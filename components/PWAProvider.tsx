@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Download, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -10,28 +10,52 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
-const INSTALL_DISMISSED_KEY = 'pwa-install-dismissed'
-const INSTALL_DISMISSED_UNTIL_KEY = 'pwa-install-dismissed-until'
+// Store the event globally so it's never lost between renders/navigations
+// Android Chrome fires beforeinstallprompt very early — must capture at module level
+let _deferredPrompt: BeforeInstallPromptEvent | null = null
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    _deferredPrompt = e as BeforeInstallPromptEvent
+    console.log('[PWA] beforeinstallprompt captured globally')
+    // Dispatch custom event so React component can react
+    window.dispatchEvent(new CustomEvent('pwa-prompt-ready'))
+  })
+}
+
+const DISMISSED_UNTIL_KEY = 'pwa-dismissed-until'
 
 export default function PWAProvider() {
   const router = useRouter()
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [hasPrompt, setHasPrompt] = useState(false)
   const [showBanner, setShowBanner] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
+  const swRegistered = useRef(false)
 
-  // ── Register SW + listen for install prompt ──────────────────────────────
   useEffect(() => {
-    // Check if already running as installed PWA
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    // Already running as installed PWA
+    if (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true
+    ) {
       setIsInstalled(true)
+      return
     }
 
-    // Register service worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    // ── Register Service Worker ──────────────────────────────────────────
+    if ('serviceWorker' in navigator && !swRegistered.current) {
+      swRegistered.current = true
+      navigator.serviceWorker
+        .register('/sw.js', { scope: '/', updateViaCache: 'none' })
         .then((reg) => {
           console.log('[SW] registered, scope:', reg.scope)
-          // Listen for SW messages (e.g. navigate from notification click)
+
+          // Force update check — important after deployments
+          reg.update().catch(() => {})
+
+          // Listen for SW messages (navigate from notification click)
           navigator.serviceWorker.addEventListener('message', (e) => {
             if (e.data?.type === 'navigate' && e.data.url) {
               router.push(e.data.url)
@@ -41,77 +65,77 @@ export default function PWAProvider() {
         .catch((err) => console.warn('[SW] registration failed:', err))
     }
 
-    // Capture install prompt
-    const handler = (e: Event) => {
-      e.preventDefault()
-      setInstallPrompt(e as BeforeInstallPromptEvent)
-
-      // Don't show if already installed or recently dismissed
-      if (window.matchMedia('(display-mode: standalone)').matches) return
-      const dismissedUntil = localStorage.getItem(INSTALL_DISMISSED_UNTIL_KEY)
+    // ── Handle install prompt ────────────────────────────────────────────
+    function onPromptReady() {
+      setHasPrompt(true)
+      const dismissedUntil = localStorage.getItem(DISMISSED_UNTIL_KEY)
       if (dismissedUntil && Date.now() < parseInt(dismissedUntil)) return
-
-      // Show banner after a short delay (not immediately on load)
-      setTimeout(() => setShowBanner(true), 3000)
+      // Show banner after 4s of usage — not immediately
+      setTimeout(() => setShowBanner(true), 4000)
     }
 
-    window.addEventListener('beforeinstallprompt', handler)
+    // Check if prompt was already captured before this component mounted
+    if (_deferredPrompt) {
+      onPromptReady()
+    }
+
+    window.addEventListener('pwa-prompt-ready', onPromptReady)
 
     // Detect successful install
     window.addEventListener('appinstalled', () => {
+      console.log('[PWA] installed successfully')
       setIsInstalled(true)
       setShowBanner(false)
-      setInstallPrompt(null)
-      console.log('[PWA] app installed')
+      _deferredPrompt = null
     })
 
-    return () => window.removeEventListener('beforeinstallprompt', handler)
+    return () => {
+      window.removeEventListener('pwa-prompt-ready', onPromptReady)
+    }
   }, [router])
 
-  // ── Request notification permission (after user interaction) ─────────────
   const requestNotificationPermission = useCallback(async () => {
     if (!('Notification' in window)) return
-    if (Notification.permission === 'granted') return
-    if (Notification.permission === 'denied') return
-
+    if (Notification.permission !== 'default') return
     const result = await Notification.requestPermission()
     console.log('[PWA] notification permission:', result)
   }, [])
 
-  // Request notification permission after install or on first meaningful interaction
   useEffect(() => {
     if (isInstalled && 'Notification' in window && Notification.permission === 'default') {
-      // Wait a bit before asking
-      const timer = setTimeout(requestNotificationPermission, 5000)
-      return () => clearTimeout(timer)
+      const t = setTimeout(requestNotificationPermission, 5000)
+      return () => clearTimeout(t)
     }
   }, [isInstalled, requestNotificationPermission])
 
-  // ── Install handler ───────────────────────────────────────────────────────
   async function handleInstall() {
-    if (!installPrompt) return
+    if (!_deferredPrompt) {
+      console.warn('[PWA] no deferred prompt available')
+      return
+    }
     setShowBanner(false)
-    await installPrompt.prompt()
-    const { outcome } = await installPrompt.userChoice
+    const prompt = _deferredPrompt
+    _deferredPrompt = null
+    setHasPrompt(false)
+
+    await prompt.prompt()
+    const { outcome } = await prompt.userChoice
     console.log('[PWA] install outcome:', outcome)
     if (outcome === 'accepted') {
-      setInstallPrompt(null)
-      // Request notifications after install
       setTimeout(requestNotificationPermission, 2000)
     }
   }
 
   function handleDismiss() {
     setShowBanner(false)
-    // Don't show again for 3 days
-    localStorage.setItem(INSTALL_DISMISSED_UNTIL_KEY, String(Date.now() + 3 * 24 * 60 * 60 * 1000))
+    localStorage.setItem(DISMISSED_UNTIL_KEY, String(Date.now() + 3 * 24 * 60 * 60 * 1000))
   }
 
   if (isInstalled) return null
 
   return (
     <AnimatePresence>
-      {showBanner && installPrompt && (
+      {showBanner && hasPrompt && (
         <motion.div
           initial={{ opacity: 0, y: 80 }}
           animate={{ opacity: 1, y: 0 }}
@@ -125,11 +149,7 @@ export default function PWAProvider() {
             <p className="text-xs text-white/80">Add to home screen for the best experience</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={handleDismiss}
-              className="text-white/70 hover:text-white p-1"
-              aria-label="Dismiss"
-            >
+            <button onClick={handleDismiss} className="text-white/70 hover:text-white p-1" aria-label="Dismiss">
               <X className="w-4 h-4" />
             </button>
             <button
@@ -145,23 +165,18 @@ export default function PWAProvider() {
   )
 }
 
-// ── Utility: send a local notification (foreground) ───────────────────────
 export async function sendLocalNotification(opts: {
-  title: string
-  body: string
-  conversationId?: string
-  icon?: string
+  title: string; body: string; conversationId?: string; icon?: string
 }) {
-  if (!('Notification' in window)) return
-  if (Notification.permission !== 'granted') return
-
-  // Use SW notification for better behavior
-  const reg = await navigator.serviceWorker.ready
-  await reg.showNotification(opts.title, {
-    body: opts.body,
-    icon: opts.icon ?? '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    tag: opts.conversationId ?? 'chat',
-    data: { conversationId: opts.conversationId },
-  } as NotificationOptions)
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  try {
+    const reg = await navigator.serviceWorker.ready
+    await reg.showNotification(opts.title, {
+      body: opts.body,
+      icon: opts.icon ?? '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: opts.conversationId ?? 'chat',
+      data: { conversationId: opts.conversationId },
+    } as NotificationOptions)
+  } catch {}
 }

@@ -1,35 +1,48 @@
 {
   "name": "Telegram Clone",
   "short_name": "Chat",
-  "description": "A Telegram-like chat application",
-  "start_url": "/",
+  "description": "A Telegram-like real-time chat application",
+  "start_url": "/chat",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#17212b",
-  "theme_color": "#17212b",
+  "theme_color": "#2AABEE",
   "lang": "en",
   "categories": ["social", "communication"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
-  "screenshots": [],
   "shortcuts": [
     {
       "name": "Open Chat",
+      "short_name": "Chat",
       "url": "/chat",
-      "description": "Go to your chats"
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

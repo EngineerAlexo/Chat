@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useCallStore } from '@/lib/stores/useCallStore'
 import { useWebRTC } from '@/lib/hooks/useWebRTC'
@@ -10,40 +10,73 @@ import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react'
 interface Props { currentUserId: string }
 
 export default function CallModal({ currentUserId }: Props) {
-  const store = useCallStore()
   const {
     state, callType, remoteUsername, remoteAvatar, remoteUserId, conversationId,
     localStream, remoteStream, isMuted, isCameraOff, toggleMute, toggleCamera,
-  } = store
+  } = useCallStore()
 
   const { initiateCall, answerCall, hangUp, rejectCall } = useWebRTC(currentUserId)
 
   const localVideoRef  = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const didInitiate    = useRef(false)
+  const [callSeconds, setCallSeconds] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Attach streams to video elements
+  // ── Attach local stream ────────────────────────────────────────────────
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-    }
+    const el = localVideoRef.current
+    if (!el || !localStream) return
+    el.srcObject = localStream
+    // Android requires explicit play() call
+    el.play().catch(() => {})
   }, [localStream])
 
+  // ── Attach remote stream ───────────────────────────────────────────────
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream
+    if (!remoteStream) return
+
+    // Audio call — use audio element
+    const audioEl = remoteAudioRef.current
+    if (audioEl) {
+      audioEl.srcObject = remoteStream
+      audioEl.volume = 1.0
+      audioEl.play().catch((e) => console.warn('[CallModal] audio play failed:', e))
+    }
+
+    // Video call — use video element
+    const videoEl = remoteVideoRef.current
+    if (videoEl) {
+      videoEl.srcObject = remoteStream
+      videoEl.play().catch((e) => console.warn('[CallModal] video play failed:', e))
     }
   }, [remoteStream])
 
-  // Initiate call when state transitions to 'calling'
+  // ── Call timer — starts when connected ────────────────────────────────
+  useEffect(() => {
+    if (state === 'connected') {
+      setCallSeconds(0)
+      timerRef.current = setInterval(() => setCallSeconds((s) => s + 1), 1000)
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+      if (state === 'idle') setCallSeconds(0)
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [state])
+
+  // ── Initiate call when state → 'calling' ──────────────────────────────
   useEffect(() => {
     if (state !== 'calling') return
     if (didInitiate.current) return
     if (!conversationId || !callType || !remoteUserId) return
 
     didInitiate.current = true
-    console.log('[CallModal] initiating call to', remoteUserId)
-
     initiateCall(remoteUserId, remoteUsername ?? 'Unknown', remoteAvatar ?? null, conversationId, callType)
       .catch((err) => {
         console.error('[CallModal] initiateCall failed:', err)
@@ -51,17 +84,12 @@ export default function CallModal({ currentUserId }: Props) {
       })
   }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset guard when call ends
   useEffect(() => {
     if (state === 'idle') didInitiate.current = false
   }, [state])
 
   async function handleAccept() {
-    if (!conversationId || !callType || !remoteUserId) {
-      console.error('[CallModal] handleAccept: missing data', { conversationId, callType, remoteUserId })
-      return
-    }
-    console.log('[CallModal] accepting call from', remoteUserId)
+    if (!conversationId || !callType || !remoteUserId) return
     try {
       await answerCall(remoteUserId, conversationId, callType)
     } catch (err) {
@@ -71,12 +99,8 @@ export default function CallModal({ currentUserId }: Props) {
   }
 
   function handleReject() {
-    console.log('[CallModal] rejecting call')
-    if (remoteUserId) {
-      rejectCall(remoteUserId).catch(console.error)
-    } else {
-      useCallStore.getState().endCall()
-    }
+    if (remoteUserId) rejectCall(remoteUserId).catch(console.error)
+    else useCallStore.getState().endCall()
   }
 
   if (state === 'idle') return null
@@ -84,7 +108,7 @@ export default function CallModal({ currentUserId }: Props) {
   const statusText =
     state === 'calling'   ? `Calling... (${callType})` :
     state === 'receiving' ? `Incoming ${callType} call` :
-    'Connected'
+    formatDuration(callSeconds)
 
   return (
     <AnimatePresence>
@@ -96,11 +120,20 @@ export default function CallModal({ currentUserId }: Props) {
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80"
       >
+        {/* Hidden audio element for remote audio — always present */}
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+
         <div className="relative w-full max-w-sm mx-4 bg-gray-900 rounded-3xl overflow-hidden shadow-2xl">
 
           {/* Remote video */}
           {callType === 'video' && state === 'connected' && remoteStream ? (
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-96 object-cover bg-black" />
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="w-full h-96 object-cover bg-black"
+            />
           ) : (
             <div className="h-72 flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-gray-800 to-gray-900">
               <Avatar src={remoteAvatar} name={remoteUsername ?? 'U'} size={80} />
@@ -133,11 +166,15 @@ export default function CallModal({ currentUserId }: Props) {
               </div>
             ) : (
               <div className="flex items-center justify-center gap-4">
-                <CallBtn icon={isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                  onClick={toggleMute} active={isMuted} label={isMuted ? 'Unmute' : 'Mute'} />
+                <CallBtn
+                  icon={isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                  onClick={toggleMute} active={isMuted} label={isMuted ? 'Unmute' : 'Mute'}
+                />
                 {callType === 'video' && (
-                  <CallBtn icon={isCameraOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
-                    onClick={toggleCamera} active={isCameraOff} label={isCameraOff ? 'Camera on' : 'Camera off'} />
+                  <CallBtn
+                    icon={isCameraOff ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    onClick={toggleCamera} active={isCameraOff} label={isCameraOff ? 'Camera on' : 'Camera off'}
+                  />
                 )}
                 <button onClick={hangUp}
                   className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition active:scale-95">
@@ -163,4 +200,10 @@ function CallBtn({ icon, onClick, active, label }: {
       {icon}
     </button>
   )
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
 }

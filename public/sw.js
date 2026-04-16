@@ -1,7 +1,6 @@
-const CACHE_NAME = 'chatapp-v2'
+// Service Worker v3 — bump version to force re-install on Android
+const CACHE_NAME = 'chatapp-v3'
 const STATIC_ASSETS = [
-  '/',
-  '/chat',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -9,20 +8,29 @@ const STATIC_ASSETS = [
 
 // ── Install ────────────────────────────────────────────────────────────────
 self.addEventListener('install', (e) => {
+  console.log('[SW] installing v3')
+  // skipWaiting so new SW takes control immediately — critical for Android install prompt
   self.skipWaiting()
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(STATIC_ASSETS).catch(() => {}))
+      .then((cache) => cache.addAll(STATIC_ASSETS).catch((err) => console.warn('[SW] precache failed:', err)))
   )
 })
 
 // ── Activate ───────────────────────────────────────────────────────────────
 self.addEventListener('activate', (e) => {
+  console.log('[SW] activating v3')
   e.waitUntil(
     Promise.all([
+      // clients.claim() makes SW control all open pages immediately
+      // This is required for Android Chrome to show "Install App"
       clients.claim(),
+      // Delete old caches
       caches.keys().then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+        Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => {
+          console.log('[SW] deleting old cache:', k)
+          return caches.delete(k)
+        }))
       ),
     ])
   )
@@ -33,31 +41,46 @@ self.addEventListener('fetch', (e) => {
   const { request } = e
   const url = new URL(request.url)
 
+  // Only handle same-origin GET requests
   if (request.method !== 'GET') return
   if (url.origin !== location.origin) return
+
+  // Never intercept Supabase API calls
   if (url.hostname.includes('supabase.co')) return
 
-  // Navigation — network first, fallback to cache
+  // Navigation requests — network first, SW-cached fallback
   if (request.mode === 'navigate') {
     e.respondWith(
       fetch(request)
         .then((res) => {
-          const clone = res.clone()
-          caches.open(CACHE_NAME).then((c) => c.put(request, clone))
+          // Cache successful navigation responses
+          if (res.ok) {
+            const clone = res.clone()
+            caches.open(CACHE_NAME).then((c) => c.put(request, clone))
+          }
           return res
         })
-        .catch(() => caches.match(request).then((r) => r ?? caches.match('/')))
+        .catch(() =>
+          caches.match(request)
+            .then((r) => r ?? caches.match('/'))
+        )
     )
     return
   }
 
-  // Static assets — cache first
-  if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icons/') || url.pathname === '/manifest.json') {
+  // Static Next.js assets + icons — cache first
+  if (
+    url.pathname.startsWith('/_next/static/') ||
+    url.pathname.startsWith('/icons/') ||
+    url.pathname === '/manifest.json'
+  ) {
     e.respondWith(
       caches.match(request).then(
         (cached) => cached ?? fetch(request).then((res) => {
-          const clone = res.clone()
-          caches.open(CACHE_NAME).then((c) => c.put(request, clone))
+          if (res.ok) {
+            const clone = res.clone()
+            caches.open(CACHE_NAME).then((c) => c.put(request, clone))
+          }
           return res
         })
       )
@@ -65,7 +88,7 @@ self.addEventListener('fetch', (e) => {
     return
   }
 
-  // Everything else — network first
+  // Everything else — network first, cache fallback
   e.respondWith(
     fetch(request)
       .then((res) => {
@@ -85,22 +108,21 @@ self.addEventListener('push', (e) => {
   let data
   try { data = e.data.json() } catch { return }
 
-  const { title = 'New message', body = '', conversationId, senderAvatar } = data
+  const { title = 'New message', body = '', conversationId, icon } = data
 
   e.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: senderAvatar ?? '/icons/icon-192.png',
+      icon: icon ?? '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       tag: conversationId ?? 'chat',
-      renotify: true,
       data: { conversationId },
       vibrate: [200, 100, 200],
     })
   )
 })
 
-// ── Notification click — open/focus app and navigate ──────────────────────
+// ── Notification click ─────────────────────────────────────────────────────
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const convId = e.notification.data?.conversationId
@@ -108,7 +130,6 @@ self.addEventListener('notificationclick', (e) => {
 
   e.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
-      // Focus existing window if open
       for (const client of windowClients) {
         if (client.url.includes(location.origin)) {
           client.focus()
@@ -116,7 +137,6 @@ self.addEventListener('notificationclick', (e) => {
           return
         }
       }
-      // Open new window
       return clients.openWindow(url)
     })
   )
