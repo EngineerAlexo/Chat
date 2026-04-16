@@ -1,7 +1,5 @@
-const CACHE_NAME = 'chatapp-v1'
-
-// Assets to pre-cache on install
-const PRECACHE = [
+const CACHE_NAME = 'chatapp-v2'
+const STATIC_ASSETS = [
   '/',
   '/chat',
   '/manifest.json',
@@ -9,20 +7,20 @@ const PRECACHE = [
   '/icons/icon-512.png',
 ]
 
+// ── Install ────────────────────────────────────────────────────────────────
 self.addEventListener('install', (e) => {
-  // Skip waiting so new SW activates immediately
   self.skipWaiting()
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE).catch(() => {}))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(STATIC_ASSETS).catch(() => {}))
   )
 })
 
+// ── Activate ───────────────────────────────────────────────────────────────
 self.addEventListener('activate', (e) => {
-  // Take control of all clients immediately
   e.waitUntil(
     Promise.all([
       clients.claim(),
-      // Delete old caches
       caches.keys().then((keys) =>
         Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
       ),
@@ -30,18 +28,16 @@ self.addEventListener('activate', (e) => {
   )
 })
 
+// ── Fetch ──────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (e) => {
   const { request } = e
   const url = new URL(request.url)
 
-  // Only handle GET requests on same origin
   if (request.method !== 'GET') return
   if (url.origin !== location.origin) return
-
-  // Skip Supabase API calls — always go to network
   if (url.hostname.includes('supabase.co')) return
 
-  // Network-first for navigation (HTML pages)
+  // Navigation — network first, fallback to cache
   if (request.mode === 'navigate') {
     e.respondWith(
       fetch(request)
@@ -55,27 +51,21 @@ self.addEventListener('fetch', (e) => {
     return
   }
 
-  // Cache-first for static assets (JS, CSS, images, fonts)
-  if (
-    url.pathname.startsWith('/_next/static/') ||
-    url.pathname.startsWith('/icons/') ||
-    url.pathname === '/manifest.json'
-  ) {
+  // Static assets — cache first
+  if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icons/') || url.pathname === '/manifest.json') {
     e.respondWith(
       caches.match(request).then(
-        (cached) =>
-          cached ??
-          fetch(request).then((res) => {
-            const clone = res.clone()
-            caches.open(CACHE_NAME).then((c) => c.put(request, clone))
-            return res
-          })
+        (cached) => cached ?? fetch(request).then((res) => {
+          const clone = res.clone()
+          caches.open(CACHE_NAME).then((c) => c.put(request, clone))
+          return res
+        })
       )
     )
     return
   }
 
-  // Network-first for everything else
+  // Everything else — network first
   e.respondWith(
     fetch(request)
       .then((res) => {
@@ -86,5 +76,48 @@ self.addEventListener('fetch', (e) => {
         return res
       })
       .catch(() => caches.match(request))
+  )
+})
+
+// ── Push Notifications ─────────────────────────────────────────────────────
+self.addEventListener('push', (e) => {
+  if (!e.data) return
+  let data
+  try { data = e.data.json() } catch { return }
+
+  const { title = 'New message', body = '', conversationId, senderAvatar } = data
+
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: senderAvatar ?? '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: conversationId ?? 'chat',
+      renotify: true,
+      data: { conversationId },
+      vibrate: [200, 100, 200],
+    })
+  )
+})
+
+// ── Notification click — open/focus app and navigate ──────────────────────
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close()
+  const convId = e.notification.data?.conversationId
+  const url = convId ? `/chat/${convId}` : '/chat'
+
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      // Focus existing window if open
+      for (const client of windowClients) {
+        if (client.url.includes(location.origin)) {
+          client.focus()
+          client.postMessage({ type: 'navigate', url })
+          return
+        }
+      }
+      // Open new window
+      return clients.openWindow(url)
+    })
   )
 })

@@ -48,6 +48,34 @@ export function subscribeToConversation(conversationId: string) {
 
         // Update sidebar last message
         useChatStore.getState().updateConversation(conversationId, { last_message: msg })
+
+        // Foreground notification — only when message is from someone else
+        // and the document is hidden (user switched tabs/apps)
+        if (
+          msg.sender_id !== currentUser?.id &&
+          typeof document !== 'undefined' &&
+          document.hidden &&
+          'Notification' in window &&
+          Notification.permission === 'granted'
+        ) {
+          // Find sender name from conversations
+          const convs = useChatStore.getState().conversations
+          const conv = convs.find((c) => c.id === conversationId)
+          const sender = conv?.participants?.find((p) => p.user_id === msg.sender_id)
+          const senderName = sender?.profile?.username ?? 'New message'
+          const body = msg.content ?? (msg.media_type ? `📎 ${msg.media_type}` : '')
+
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.showNotification(senderName, {
+              body,
+              icon: sender?.profile?.avatar_url ?? '/icons/icon-192.png',
+              badge: '/icons/icon-192.png',
+              tag: conversationId,
+              renotify: true,
+              data: { conversationId },
+            }).catch(() => {})
+          }).catch(() => {})
+        }
       }
     )
     .on(

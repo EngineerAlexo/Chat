@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import { useCallStore } from '@/lib/stores/useCallStore'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-// ─── STUN servers ─────────────────────────────────────────────────────────────
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -14,49 +13,76 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 }
 
-// ─── Shared call channel name (both peers join the same channel) ──────────────
-// Format: call:<smaller-uid>:<larger-uid>  — deterministic, same for both peers
 function callChannelName(a: string, b: string) {
   return `call:${[a, b].sort().join(':')}`
 }
 
-// ─── Personal notification channel (only this user listens) ──────────────────
-function incomingChannelName(userId: string) {
+function ringChannelName(userId: string) {
   return `ring:${userId}`
 }
 
+function log(...args: unknown[]) {
+  console.log('[WebRTC]', new Date().toISOString().slice(11, 23), ...args)
+}
+
 export function useWebRTC(currentUserId: string) {
-  const pcRef           = useRef<RTCPeerConnection | null>(null)
-  const callChRef       = useRef<RealtimeChannel | null>(null)   // shared signaling channel
-  const ringChRef       = useRef<RealtimeChannel | null>(null)   // personal incoming channel
-  const iceCandidates   = useRef<RTCIceCandidateInit[]>([])      // queue before remote desc
-  const remoteDescSet   = useRef(false)
+  // All mutable state in refs — never stale in callbacks
+  const pcRef         = useRef<RTCPeerConnection | null>(null)
+  const callChRef     = useRef<RealtimeChannel | null>(null)
+  const iceQueue      = useRef<RTCIceCandidateInit[]>([])
+  const remoteReady   = useRef(false)   // true after setRemoteDescription
+  const userIdRef     = useRef(currentUserId)
+  userIdRef.current   = currentUserId
 
-  const {
-    setLocalStream, setRemoteStream, setConnected, endCall,
-  } = useCallStore()
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  function log(...args: unknown[]) {
-    console.log('[WebRTC]', ...args)
+  // ── cleanup ────────────────────────────────────────────────────────────────
+  function cleanup() {
+    log('cleanup')
+    pcRef.current?.close()
+    pcRef.current = null
+    remoteReady.current = false
+    iceQueue.current = []
+    const supabase = getSupabaseClient()
+    if (callChRef.current) {
+      supabase.removeChannel(callChRef.current)
+      callChRef.current = null
+    }
+    useCallStore.getState().endCall()
   }
 
+  // ── drain queued ICE candidates ────────────────────────────────────────────
+  async function drainIce(pc: RTCPeerConnection) {
+    log('draining', iceQueue.current.length, 'queued ICE candidates')
+    const queue = [...iceQueue.current]
+    iceQueue.current = []
+    for (const c of queue) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)) }
+      catch (e) { log('ICE drain error', e) }
+    }
+  }
+
+  // ── create RTCPeerConnection ───────────────────────────────────────────────
   function createPC(): RTCPeerConnection {
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+    remoteReady.current = false
+    iceQueue.current = []
+
     const pc = new RTCPeerConnection(ICE_SERVERS)
     pcRef.current = pc
-    remoteDescSet.current = false
-    iceCandidates.current = []
 
     pc.ontrack = (e) => {
-      log('ontrack fired, streams:', e.streams.length)
+      log('ontrack — streams:', e.streams.length, 'track kind:', e.track.kind)
       const stream = e.streams[0] ?? new MediaStream([e.track])
-      setRemoteStream(stream)
+      useCallStore.getState().setRemoteStream(stream)
     }
 
     pc.onconnectionstatechange = () => {
       log('connectionState:', pc.connectionState)
-      if (pc.connectionState === 'connected') setConnected()
+      if (pc.connectionState === 'connected') {
+        useCallStore.getState().setConnected()
+      }
       if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
         cleanup()
       }
@@ -69,251 +95,250 @@ export function useWebRTC(currentUserId: string) {
     return pc
   }
 
-  async function drainIceCandidates(pc: RTCPeerConnection) {
-    log('draining', iceCandidates.current.length, 'queued ICE candidates')
-    for (const c of iceCandidates.current) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch (e) { log('ICE add error', e) }
+  // ── subscribe to shared call channel ──────────────────────────────────────
+  // Returns when SUBSCRIBED. Registers answer + ICE + end handlers.
+  async function joinCallChannel(remoteId: string): Promise<RealtimeChannel> {
+    const supabase = getSupabaseClient()
+    const name = callChannelName(userIdRef.current, remoteId)
+    log('joining call channel:', name)
+
+    // Remove any existing channel first
+    if (callChRef.current) {
+      supabase.removeChannel(callChRef.current)
+      callChRef.current = null
     }
-    iceCandidates.current = []
-  }
-
-  function cleanup() {
-    log('cleanup')
-    const supabase = getSupabaseClient()
-    pcRef.current?.close()
-    pcRef.current = null
-    remoteDescSet.current = false
-    iceCandidates.current = []
-    if (callChRef.current) { supabase.removeChannel(callChRef.current); callChRef.current = null }
-    endCall()
-  }
-
-  // ── Subscribe to the shared call channel ──────────────────────────────────
-  async function subscribeCallChannel(remoteId: string): Promise<RealtimeChannel> {
-    const supabase = getSupabaseClient()
-    const name = callChannelName(currentUserId, remoteId)
-    log('subscribing to call channel:', name)
-
-    if (callChRef.current) supabase.removeChannel(callChRef.current)
 
     const ch = supabase.channel(name, { config: { broadcast: { ack: true } } })
     callChRef.current = ch
 
-    // ── answer handler (caller listens) ──────────────────────────────────────
+    // Caller receives answer here
     ch.on('broadcast', { event: 'call:answer' }, async ({ payload }) => {
-      if (payload.from === currentUserId) return
-      log('received answer from', payload.from)
+      if (payload.from === userIdRef.current) return
+      log('received answer')
       const pc = pcRef.current
-      if (!pc) return
-      await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
-      remoteDescSet.current = true
-      await drainIceCandidates(pc)
+      if (!pc) { log('no PC for answer'); return }
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
+        remoteReady.current = true
+        await drainIce(pc)
+        log('answer applied, ICE drained')
+      } catch (e) { log('setRemoteDescription(answer) error', e) }
     })
 
-    // ── offer handler (callee listens after accepting) ────────────────────────
-    ch.on('broadcast', { event: 'call:offer' }, async ({ payload }) => {
-      if (payload.from === currentUserId) return
-      log('received offer from', payload.from)
-      // Store offer in store for answerCall to use
-      useCallStore.getState().setPendingOffer(payload.sdp)
-    })
-
-    // ── ICE candidates ────────────────────────────────────────────────────────
+    // Both sides receive ICE candidates
     ch.on('broadcast', { event: 'call:ice' }, async ({ payload }) => {
-      if (payload.from === currentUserId) return
+      if (payload.from === userIdRef.current) return
       const pc = pcRef.current
       if (!pc) return
-      if (remoteDescSet.current) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)) } catch {}
+      if (remoteReady.current) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(payload.candidate)) }
+        catch (e) { log('addIceCandidate error', e) }
       } else {
-        iceCandidates.current.push(payload.candidate)
+        log('queuing ICE candidate')
+        iceQueue.current.push(payload.candidate)
       }
     })
 
-    // ── end / reject ──────────────────────────────────────────────────────────
     ch.on('broadcast', { event: 'call:end' }, ({ payload }) => {
-      if (payload.from === currentUserId) return
-      log('call ended by remote')
+      if (payload.from === userIdRef.current) return
+      log('remote ended call')
       cleanup()
     })
 
     ch.on('broadcast', { event: 'call:reject' }, ({ payload }) => {
-      if (payload.from === currentUserId) return
-      log('call rejected by remote')
+      if (payload.from === userIdRef.current) return
+      log('remote rejected call')
       cleanup()
     })
 
-    await new Promise<void>((resolve) => {
+    // Wait for subscription to be confirmed
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('channel subscribe timeout')), 8000)
       ch.subscribe((status) => {
         log('call channel status:', status)
-        if (status === 'SUBSCRIBED') resolve()
+        if (status === 'SUBSCRIBED') { clearTimeout(timer); resolve() }
+        if (status === 'CHANNEL_ERROR') { clearTimeout(timer); reject(new Error('channel error')) }
       })
     })
 
     return ch
   }
 
-  // ── INITIATE CALL (caller side) ────────────────────────────────────────────
-  const initiateCall = useCallback(async (
+  // ── INITIATE CALL (caller) ─────────────────────────────────────────────────
+  async function initiateCall(
     remoteId: string,
     remoteUsername: string,
     remoteAvatar: string | null,
     convId: string,
     type: 'audio' | 'video',
-  ) => {
+  ) {
     log('initiating', type, 'call to', remoteId)
 
-    // 1. Get media first
+    // 1. Get local media
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
       video: type === 'video',
     })
-    setLocalStream(stream)
+    useCallStore.getState().setLocalStream(stream)
+    log('got local stream, tracks:', stream.getTracks().map(t => t.kind))
 
-    // 2. Subscribe to shared call channel
-    const ch = await subscribeCallChannel(remoteId)
+    // 2. Join shared call channel (so we receive the answer)
+    const ch = await joinCallChannel(remoteId)
 
-    // 3. Create peer connection and add tracks
+    // 3. Create PC and add tracks BEFORE creating offer
     const pc = createPC()
     stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+    log('tracks added to PC')
 
-    // 4. Wire ICE candidate sending
+    // 4. Wire ICE sending
     pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        log('sending ICE candidate')
-        ch.send({
-          type: 'broadcast', event: 'call:ice',
-          payload: { candidate: e.candidate.toJSON(), from: currentUserId },
-        })
-      }
+      if (!e.candidate) return
+      log('sending ICE candidate')
+      ch.send({
+        type: 'broadcast', event: 'call:ice',
+        payload: { candidate: e.candidate.toJSON(), from: userIdRef.current },
+      })
     }
 
-    // 5. Send ring notification to receiver's personal channel FIRST
+    // 5. Create offer
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    log('offer created and set as local description')
+
+    // 6. Ring the receiver — send incoming notification + offer SDP together
     const supabase = getSupabaseClient()
-    const ringCh = supabase.channel(incomingChannelName(remoteId))
+    const ringCh = supabase.channel(ringChannelName(remoteId))
     await new Promise<void>((resolve) => {
-      ringCh.subscribe((status) => { if (status === 'SUBSCRIBED') resolve() })
+      ringCh.subscribe((s) => { if (s === 'SUBSCRIBED') resolve() })
     })
+
+    const myName   = useCallStore.getState().currentUserName ?? userIdRef.current
+    const myAvatar = useCallStore.getState().currentUserAvatar ?? null
 
     log('sending call:incoming to', remoteId)
     await ringCh.send({
       type: 'broadcast', event: 'call:incoming',
       payload: {
-        from: currentUserId,
+        from: userIdRef.current,
         callType: type,
         conversationId: convId,
-        remoteUsername: useCallStore.getState().currentUserName ?? currentUserId,
-        remoteAvatar: useCallStore.getState().currentUserAvatar ?? null,
+        remoteUsername: myName,
+        remoteAvatar: myAvatar,
+        // Include offer SDP so receiver has it immediately when they accept
+        offerSdp: offer,
       },
     })
     supabase.removeChannel(ringCh)
+    log('ring sent, offer included in payload')
+  }
 
-    // 6. Create and send offer
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-    log('sending offer')
-
-    await ch.send({
-      type: 'broadcast', event: 'call:offer',
-      payload: { sdp: offer, from: currentUserId, callType: type, conversationId: convId },
-    })
-  }, [currentUserId, setLocalStream]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── ANSWER CALL (callee side) ──────────────────────────────────────────────
-  const answerCall = useCallback(async (
+  // ── ANSWER CALL (callee) ───────────────────────────────────────────────────
+  async function answerCall(
     remoteId: string,
     convId: string,
     type: 'audio' | 'video',
-  ) => {
+  ) {
     log('answering call from', remoteId)
 
+    // Get the pending offer — must exist
     const pendingOffer = useCallStore.getState().pendingOffer
-    if (!pendingOffer) { log('no pending offer!'); return }
+    if (!pendingOffer) {
+      log('ERROR: no pending offer in store!')
+      throw new Error('No pending offer')
+    }
+    log('pending offer found, type:', pendingOffer.type)
 
-    // 1. Get media
+    // 1. Get local media
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
       video: type === 'video',
     })
-    setLocalStream(stream)
+    useCallStore.getState().setLocalStream(stream)
+    log('got local stream, tracks:', stream.getTracks().map(t => t.kind))
 
-    // 2. Subscribe to shared call channel
-    const ch = await subscribeCallChannel(remoteId)
+    // 2. Join shared call channel (so caller receives our answer)
+    const ch = await joinCallChannel(remoteId)
 
-    // 3. Create peer connection and add tracks
+    // 3. Create PC and add tracks BEFORE setRemoteDescription
     const pc = createPC()
     stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+    log('tracks added to PC')
 
-    // 4. Wire ICE candidate sending
+    // 4. Wire ICE sending
     pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        log('sending ICE candidate')
-        ch.send({
-          type: 'broadcast', event: 'call:ice',
-          payload: { candidate: e.candidate.toJSON(), from: currentUserId },
-        })
-      }
+      if (!e.candidate) return
+      log('sending ICE candidate')
+      ch.send({
+        type: 'broadcast', event: 'call:ice',
+        payload: { candidate: e.candidate.toJSON(), from: userIdRef.current },
+      })
     }
 
-    // 5. Set remote description (the offer)
+    // 5. Apply offer → create answer → send answer
+    log('setting remote description (offer)')
     await pc.setRemoteDescription(new RTCSessionDescription(pendingOffer))
-    remoteDescSet.current = true
-    await drainIceCandidates(pc)
+    remoteReady.current = true
+    await drainIce(pc)
+    log('remote description set, ICE drained')
 
-    // 6. Create and send answer
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    log('sending answer')
+    log('answer created and set as local description')
 
     await ch.send({
       type: 'broadcast', event: 'call:answer',
-      payload: { sdp: answer, from: currentUserId },
+      payload: { sdp: answer, from: userIdRef.current },
     })
+    log('answer sent')
 
     useCallStore.getState().clearPendingOffer()
-  }, [currentUserId, setLocalStream]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   // ── HANG UP ────────────────────────────────────────────────────────────────
-  const hangUp = useCallback(() => {
+  function hangUp() {
     log('hanging up')
-    const { remoteUserId } = useCallStore.getState()
-    if (callChRef.current && remoteUserId) {
+    if (callChRef.current) {
       callChRef.current.send({
         type: 'broadcast', event: 'call:end',
-        payload: { from: currentUserId },
+        payload: { from: userIdRef.current },
       })
     }
     cleanup()
-  }, [currentUserId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
-  // ── REJECT (callee declines) ───────────────────────────────────────────────
-  const rejectCall = useCallback(async (remoteId: string) => {
+  // ── REJECT ─────────────────────────────────────────────────────────────────
+  async function rejectCall(remoteId: string) {
     log('rejecting call from', remoteId)
     const supabase = getSupabaseClient()
-    const name = callChannelName(currentUserId, remoteId)
+    const name = callChannelName(userIdRef.current, remoteId)
     const ch = supabase.channel(name)
     await new Promise<void>((r) => ch.subscribe((s) => { if (s === 'SUBSCRIBED') r() }))
     await ch.send({
       type: 'broadcast', event: 'call:reject',
-      payload: { from: currentUserId },
+      payload: { from: userIdRef.current },
     })
     supabase.removeChannel(ch)
     useCallStore.getState().endCall()
-  }, [currentUserId])
+  }
 
-  // ── LISTEN FOR INCOMING CALLS (always active) ─────────────────────────────
+  // ── LISTEN FOR INCOMING CALLS (always active while logged in) ─────────────
   useEffect(() => {
     if (!currentUserId) return
     const supabase = getSupabaseClient()
-    const name = incomingChannelName(currentUserId)
-    log('listening for incoming calls on', name)
+    const name = ringChannelName(currentUserId)
+    log('listening for incoming calls on channel:', name)
 
     const ch = supabase.channel(name)
-    ringChRef.current = ch
 
     ch.on('broadcast', { event: 'call:incoming' }, ({ payload }) => {
       if (payload.from === currentUserId) return
       log('incoming call from', payload.from, 'type:', payload.callType)
+      log('offer included in payload:', !!payload.offerSdp)
+
+      // Store the offer immediately — available when user clicks Accept
+      if (payload.offerSdp) {
+        useCallStore.getState().setPendingOffer(payload.offerSdp)
+      }
 
       useCallStore.getState().receiveCall({
         callType: payload.callType,
@@ -328,7 +353,6 @@ export function useWebRTC(currentUserId: string) {
 
     return () => {
       supabase.removeChannel(ch)
-      ringChRef.current = null
     }
   }, [currentUserId])
 
