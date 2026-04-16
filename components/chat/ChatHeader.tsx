@@ -67,6 +67,11 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
 
   function handleAudioCall() {
     if (!otherUserId || !otherProfile) return
+    // Store caller's own info so it can be sent in the ring notification
+    useCallStore.getState().setCurrentUserInfo(
+      currentUser?.username ?? null,
+      currentUser?.avatar_url ?? null,
+    )
     startCall({
       callType: 'audio',
       remoteUserId: otherUserId,
@@ -78,6 +83,10 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
 
   function handleVideoCall() {
     if (!otherUserId || !otherProfile) return
+    useCallStore.getState().setCurrentUserInfo(
+      currentUser?.username ?? null,
+      currentUser?.avatar_url ?? null,
+    )
     startCall({
       callType: 'video',
       remoteUserId: otherUserId,

@@ -15,6 +15,16 @@ interface CallStore {
   isMuted: boolean
   isCameraOff: boolean
 
+  // Caller's own info (needed to send in ring notification)
+  currentUserName: string | null
+  currentUserAvatar: string | null
+  setCurrentUserInfo: (name: string | null, avatar: string | null) => void
+
+  // Pending offer from caller (stored when ring arrives, used when accepting)
+  pendingOffer: RTCSessionDescriptionInit | null
+  setPendingOffer: (sdp: RTCSessionDescriptionInit) => void
+  clearPendingOffer: () => void
+
   startCall: (opts: { callType: CallType; remoteUserId: string; remoteUsername: string; remoteAvatar: string | null; conversationId: string }) => void
   receiveCall: (opts: { callType: CallType; remoteUserId: string; remoteUsername: string; remoteAvatar: string | null; conversationId: string }) => void
   setConnected: () => void
@@ -36,6 +46,13 @@ export const useCallStore = create<CallStore>((set, get) => ({
   remoteStream: null,
   isMuted: false,
   isCameraOff: false,
+  currentUserName: null,
+  currentUserAvatar: null,
+  pendingOffer: null,
+
+  setCurrentUserInfo: (name, avatar) => set({ currentUserName: name, currentUserAvatar: avatar }),
+  setPendingOffer: (sdp) => set({ pendingOffer: sdp }),
+  clearPendingOffer: () => set({ pendingOffer: null }),
 
   startCall: (opts) => set({ state: 'calling', ...opts }),
   receiveCall: (opts) => set({ state: 'receiving', ...opts }),
@@ -68,6 +85,7 @@ export const useCallStore = create<CallStore>((set, get) => ({
       remoteStream: null,
       isMuted: false,
       isCameraOff: false,
+      pendingOffer: null,
     })
   },
 }))
