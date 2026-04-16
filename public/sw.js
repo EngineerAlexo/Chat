@@ -1,8 +1,14 @@
-// Service Worker v3 — bump version to force re-install on Android
-const CACHE_NAME = 'chatapp-v3'
+// Service Worker v4 — all PWA icon sizes cached
+const CACHE_NAME = 'chatapp-v4'
 const STATIC_ASSETS = [
   '/manifest.json',
+  '/icons/icon-72.png',
+  '/icons/icon-96.png',
+  '/icons/icon-128.png',
+  '/icons/icon-144.png',
+  '/icons/icon-152.png',
   '/icons/icon-192.png',
+  '/icons/icon-384.png',
   '/icons/icon-512.png',
 ]
 
