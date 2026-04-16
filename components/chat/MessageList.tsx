@@ -4,11 +4,9 @@ import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { Message } from '@/lib/types'
-import { groupMessagesByDate } from '@/lib/utils/groupMessages'
-import { shouldShowAvatar, shouldShowSenderName } from '@/lib/utils/groupMessages'
+import { groupMessagesByDate, shouldShowAvatar, shouldShowSenderName } from '@/lib/utils/groupMessages'
 import MessageBubble from './MessageBubble'
 import { Loader2, ChevronDown } from 'lucide-react'
-import { cn } from '@/lib/utils/cn'
 
 interface Props {
   conversationId: string
@@ -19,36 +17,50 @@ interface Props {
 }
 
 export default function MessageList({ conversationId, messages, currentUserId, onLoadMore, isLoadingMore }: Props) {
-  const parentRef = useRef<HTMLDivElement>(null)
+  const parentRef        = useRef<HTMLDivElement>(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
-  const atBottomRef = useRef(true)
-  const prevLengthRef = useRef(0)
+  const atBottomRef      = useRef(true)
+  const prevLengthRef    = useRef(0)
   const isLoadingMoreRef = useRef(isLoadingMore)
-  const initialScrollDone = useRef(false)
+  const scrolledInitially = useRef(false)
+  // Track IDs of messages that existed before this render — new ones get animation
+  const knownIdsRef      = useRef<Set<string>>(new Set())
+
   isLoadingMoreRef.current = isLoadingMore
 
-  // Memoize flat items — only recompute when messages array changes
+  // Reset on conversation change
+  useEffect(() => {
+    scrolledInitially.current = false
+    prevLengthRef.current = 0
+    knownIdsRef.current = new Set()
+  }, [conversationId])
+
+  // Memoized flat list — only recomputes when messages change
   const flatItems = useMemo(() => {
     const groups = groupMessagesByDate(messages)
     const items: Array<
       | { type: 'date'; label: string }
-      | { type: 'message'; message: Message; index: number; showAvatar: boolean; showName: boolean }
+      | { type: 'message'; message: Message; index: number; showAvatar: boolean; showName: boolean; isNew: boolean }
     > = []
-    let msgIndex = 0
+    let idx = 0
     for (const group of groups) {
       items.push({ type: 'date', label: group.date })
       for (const msg of group.messages) {
-        const idx = msgIndex
+        const i = idx
+        const isNew = !knownIdsRef.current.has(msg.id)
         items.push({
           type: 'message',
           message: msg,
-          index: idx,
-          showAvatar: shouldShowAvatar(messages, idx),
-          showName: msg.sender_id !== currentUserId && shouldShowSenderName(messages, idx),
+          index: i,
+          showAvatar: shouldShowAvatar(messages, i),
+          showName: msg.sender_id !== currentUserId && shouldShowSenderName(messages, i),
+          isNew,
         })
-        msgIndex++
+        idx++
       }
     }
+    // After building, mark all current IDs as known
+    messages.forEach((m) => knownIdsRef.current.add(m.id))
     return items
   }, [messages, currentUserId])
 
@@ -61,33 +73,25 @@ export default function MessageList({ conversationId, messages, currentUserId, o
       if (item.type === 'date') return 36
       return item.message.media_type ? 220 : 72
     },
-    overscan: 8,
+    overscan: 5,  // reduced from 8 — fewer off-screen renders
   })
 
-  // Initial scroll to bottom when conversation loads
+  // Scroll to bottom on initial load — runs once per conversation
   useEffect(() => {
-    initialScrollDone.current = false
-    prevLengthRef.current = 0
-  }, [conversationId])
+    if (scrolledInitially.current || flatItems.length === 0) return
+    scrolledInitially.current = true
+    requestAnimationFrame(() => {
+      const el = parentRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }, [flatItems.length])
 
+  // Auto-scroll on new messages (only if already at bottom)
   useEffect(() => {
-    if (!initialScrollDone.current && flatItems.length > 0) {
-      initialScrollDone.current = true
-      // Use requestAnimationFrame to ensure DOM is ready
-      requestAnimationFrame(() => {
-        const el = parentRef.current
-        if (el) el.scrollTop = el.scrollHeight
-      })
-    }
-  })
-
-  // Auto-scroll to bottom on new messages (only if near bottom)
-  useEffect(() => {
-    const newLength = messages.length
-    const prevLength = prevLengthRef.current
-    prevLengthRef.current = newLength
-
-    if (newLength > prevLength && atBottomRef.current && initialScrollDone.current) {
+    const newLen = messages.length
+    const prevLen = prevLengthRef.current
+    prevLengthRef.current = newLen
+    if (newLen > prevLen && atBottomRef.current && scrolledInitially.current) {
       requestAnimationFrame(() => {
         const el = parentRef.current
         if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
@@ -98,15 +102,10 @@ export default function MessageList({ conversationId, messages, currentUserId, o
   const handleScroll = useCallback(() => {
     const el = parentRef.current
     if (!el) return
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    const isNearBottom = distFromBottom < 120
-    atBottomRef.current = isNearBottom
-    setShowScrollBtn(!isNearBottom)
-
-    // Load more when near top
-    if (el.scrollTop < 200 && !isLoadingMoreRef.current) {
-      onLoadMore()
-    }
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    atBottomRef.current = dist < 120
+    setShowScrollBtn(dist > 200)
+    if (el.scrollTop < 200 && !isLoadingMoreRef.current) onLoadMore()
   }, [onLoadMore])
 
   useEffect(() => {
@@ -116,21 +115,11 @@ export default function MessageList({ conversationId, messages, currentUserId, o
     return () => el.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
-  function scrollToBottom() {
-    const el = parentRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }
-
   return (
     <div className="relative flex-1 overflow-hidden">
-      {/* Subtle chat background */}
       <div className="absolute inset-0 bg-tg-bg-secondary dark:bg-tg-bg-dark-tertiary pointer-events-none" />
 
-      <div
-        ref={parentRef}
-        className="h-full overflow-y-auto px-2 md:px-4 py-2 relative overflow-x-hidden"
-      >
-        {/* Loading more indicator */}
+      <div ref={parentRef} className="h-full overflow-y-auto px-2 md:px-4 py-2 relative overflow-x-hidden">
         <AnimatePresence>
           {isLoadingMore && (
             <motion.div
@@ -145,21 +134,19 @@ export default function MessageList({ conversationId, messages, currentUserId, o
         </AnimatePresence>
 
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((virtualItem) => {
-            const item = flatItems[virtualItem.index]
+          {virtualizer.getVirtualItems().map((vItem) => {
+            const item = flatItems[vItem.index]
             if (!item) return null
-
             return (
               <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
+                key={vItem.key}
+                data-index={vItem.index}
                 ref={virtualizer.measureElement}
                 style={{
                   position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualItem.start}px)`,
+                  top: 0, left: 0, width: '100%',
+                  transform: `translateY(${vItem.start}px)`,
+                  willChange: 'transform',
                 }}
               >
                 {item.type === 'date' ? (
@@ -171,6 +158,7 @@ export default function MessageList({ conversationId, messages, currentUserId, o
                     showName={item.showName}
                     currentUserId={currentUserId}
                     conversationId={conversationId}
+                    isNew={item.isNew}
                   />
                 )}
               </div>
@@ -179,15 +167,14 @@ export default function MessageList({ conversationId, messages, currentUserId, o
         </div>
       </div>
 
-      {/* Scroll to bottom button */}
       <AnimatePresence>
         {showScrollBtn && (
           <motion.button
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
-            onClick={scrollToBottom}
-            className="absolute bottom-4 right-4 w-10 h-10 bg-white dark:bg-tg-bg-dark-secondary rounded-full shadow-panel flex items-center justify-center text-tg-blue hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark transition"
+            onClick={() => parentRef.current?.scrollTo({ top: parentRef.current.scrollHeight, behavior: 'smooth' })}
+            className="absolute bottom-4 right-4 w-10 h-10 bg-white dark:bg-tg-bg-dark-secondary rounded-full shadow-panel flex items-center justify-center text-tg-blue hover:bg-tg-bg-secondary dark:hover:bg-tg-bg-dark transition touch-feedback"
           >
             <ChevronDown className="w-5 h-5" />
           </motion.button>

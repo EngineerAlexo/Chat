@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, memo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useChatStore } from '@/lib/stores/useChatStore'
@@ -370,7 +370,7 @@ interface ConvItemProps {
   onClick: () => void
 }
 
-function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }: ConvItemProps) {
+const ConversationItem = memo(function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }: ConvItemProps) {
   const name = getConvName(conv, currentUser)
   const avatar = getConvAvatar(conv, currentUser)
   const otherId = getOtherUserId(conv, currentUser)
@@ -436,4 +436,4 @@ function ConversationItem({ conv, currentUser, isActive, onlineUsers, onClick }:
       </div>
     </motion.button>
   )
-}
+})
