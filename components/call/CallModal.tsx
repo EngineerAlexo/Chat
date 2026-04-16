@@ -24,59 +24,56 @@ export default function CallModal({ currentUserId }: Props) {
   const [callSeconds, setCallSeconds] = useState(0)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // ── Attach local stream ────────────────────────────────────────────────
+  // ── Attach local stream to local video element ─────────────────────────
   useEffect(() => {
     const el = localVideoRef.current
     if (!el || !localStream) return
-    el.srcObject = localStream
-    // Android requires explicit play() call
-    el.play().catch(() => {})
+    if (el.srcObject !== localStream) {
+      el.srcObject = localStream
+      el.play().catch(() => {})
+    }
   }, [localStream])
 
   // ── Attach remote stream ───────────────────────────────────────────────
+  // CRITICAL: remote video element must always be in DOM (rendered but possibly hidden)
+  // so srcObject can be set as soon as ontrack fires — before state === 'connected'
   useEffect(() => {
     if (!remoteStream) return
 
-    // Audio call — use audio element
+    // Always attach to audio element (handles audio-only calls too)
     const audioEl = remoteAudioRef.current
-    if (audioEl) {
+    if (audioEl && audioEl.srcObject !== remoteStream) {
       audioEl.srcObject = remoteStream
       audioEl.volume = 1.0
-      audioEl.play().catch((e) => console.warn('[CallModal] audio play failed:', e))
+      audioEl.play().catch((e) => console.warn('[CallModal] audio.play() failed:', e))
     }
 
-    // Video call — use video element
+    // Attach to video element
     const videoEl = remoteVideoRef.current
-    if (videoEl) {
+    if (videoEl && videoEl.srcObject !== remoteStream) {
       videoEl.srcObject = remoteStream
-      videoEl.play().catch((e) => console.warn('[CallModal] video play failed:', e))
+      videoEl.play().catch((e) => console.warn('[CallModal] video.play() failed:', e))
     }
   }, [remoteStream])
 
-  // ── Call timer — starts when connected ────────────────────────────────
+  // ── Call timer ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (state === 'connected') {
       setCallSeconds(0)
       timerRef.current = setInterval(() => setCallSeconds((s) => s + 1), 1000)
     } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
       if (state === 'idle') setCallSeconds(0)
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
-    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [state])
 
   // ── Initiate call when state → 'calling' ──────────────────────────────
   useEffect(() => {
-    if (state !== 'calling') return
-    if (didInitiate.current) return
+    if (state !== 'calling' || didInitiate.current) return
     if (!conversationId || !callType || !remoteUserId) return
-
     didInitiate.current = true
+
     initiateCall(remoteUserId, remoteUsername ?? 'Unknown', remoteAvatar ?? null, conversationId, callType)
       .catch((err) => {
         console.error('[CallModal] initiateCall failed:', err)
@@ -110,6 +107,8 @@ export default function CallModal({ currentUserId }: Props) {
     state === 'receiving' ? `Incoming ${callType} call` :
     formatDuration(callSeconds)
 
+  const showRemoteVideo = callType === 'video' && !!remoteStream
+
   return (
     <AnimatePresence>
       <motion.div
@@ -120,21 +119,24 @@ export default function CallModal({ currentUserId }: Props) {
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80"
       >
-        {/* Hidden audio element for remote audio — always present */}
+        {/* Hidden audio element — always present for remote audio */}
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
         <div className="relative w-full max-w-sm mx-4 bg-gray-900 rounded-3xl overflow-hidden shadow-2xl">
 
-          {/* Remote video */}
-          {callType === 'video' && state === 'connected' && remoteStream ? (
+          {/* Remote video — rendered always when video call, hidden until stream arrives */}
+          {callType === 'video' && (
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="w-full h-96 object-cover bg-black"
+              className={`w-full h-96 object-cover bg-black ${showRemoteVideo && state === 'connected' ? 'block' : 'hidden'}`}
             />
-          ) : (
+          )}
+
+          {/* Avatar / status — shown when no remote video yet */}
+          {(!showRemoteVideo || state !== 'connected') && (
             <div className="h-72 flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-gray-800 to-gray-900">
               <Avatar src={remoteAvatar} name={remoteUsername ?? 'U'} size={80} />
               <div className="text-center">
@@ -144,7 +146,7 @@ export default function CallModal({ currentUserId }: Props) {
             </div>
           )}
 
-          {/* Local video PiP */}
+          {/* Local video PiP — always rendered when video call and local stream exists */}
           {callType === 'video' && localStream && (
             <div className="absolute top-4 right-4 w-24 h-32 rounded-xl overflow-hidden border-2 border-white/20 bg-black">
               <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />

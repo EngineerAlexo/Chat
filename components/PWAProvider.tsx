@@ -10,18 +10,26 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
 
-// Store the event globally so it's never lost between renders/navigations
-// Android Chrome fires beforeinstallprompt very early — must capture at module level
-let _deferredPrompt: BeforeInstallPromptEvent | null = null
+// ── Module-level prompt storage ────────────────────────────────────────────
+// Must be captured at module level — Android Chrome fires this very early,
+// before React hydrates. We use a single listener registered once via a flag.
+declare global {
+  interface Window {
+    __pwaPrompt?: BeforeInstallPromptEvent
+    __pwaPromptListenerAdded?: boolean
+  }
+}
 
-if (typeof window !== 'undefined') {
+// Register the listener exactly once, even across HMR re-evaluations
+if (typeof window !== 'undefined' && !window.__pwaPromptListenerAdded) {
+  window.__pwaPromptListenerAdded = true
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
-    _deferredPrompt = e as BeforeInstallPromptEvent
-    console.log('[PWA] beforeinstallprompt captured globally')
-    // Dispatch custom event so React component can react
-    window.dispatchEvent(new CustomEvent('pwa-prompt-ready'))
+    window.__pwaPrompt = e as BeforeInstallPromptEvent
+    console.log('[PWA] beforeinstallprompt captured ✓')
+    window.dispatchEvent(new CustomEvent('pwa:prompt'))
   })
+  console.log('[PWA] beforeinstallprompt listener registered')
 }
 
 const DISMISSED_UNTIL_KEY = 'pwa-dismissed-until'
@@ -32,6 +40,9 @@ export default function PWAProvider() {
   const [showBanner, setShowBanner] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
   const swRegistered = useRef(false)
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Track whether we've already shown the banner to prevent double-show
+  const bannerShownRef = useRef(false)
 
   useEffect(() => {
     // Already running as installed PWA
@@ -51,11 +62,7 @@ export default function PWAProvider() {
         .register('/sw.js', { scope: '/', updateViaCache: 'none' })
         .then((reg) => {
           console.log('[SW] registered, scope:', reg.scope)
-
-          // Force update check — important after deployments
           reg.update().catch(() => {})
-
-          // Listen for SW messages (navigate from notification click)
           navigator.serviceWorker.addEventListener('message', (e) => {
             if (e.data?.type === 'navigate' && e.data.url) {
               router.push(e.data.url)
@@ -65,32 +72,40 @@ export default function PWAProvider() {
         .catch((err) => console.warn('[SW] registration failed:', err))
     }
 
-    // ── Handle install prompt ────────────────────────────────────────────
-    function onPromptReady() {
-      setHasPrompt(true)
+    // ── Show install banner (called at most once) ─────────────────────────
+    function maybeShowBanner() {
+      if (bannerShownRef.current) return
       const dismissedUntil = localStorage.getItem(DISMISSED_UNTIL_KEY)
       if (dismissedUntil && Date.now() < parseInt(dismissedUntil)) return
-      // Show banner after 4s of usage — not immediately
-      setTimeout(() => setShowBanner(true), 4000)
+      bannerShownRef.current = true
+      setHasPrompt(true)
+      // Delay banner so it doesn't appear on first load
+      bannerTimerRef.current = setTimeout(() => setShowBanner(true), 5000)
     }
 
     // Check if prompt was already captured before this component mounted
-    if (_deferredPrompt) {
-      onPromptReady()
+    if (window.__pwaPrompt) {
+      maybeShowBanner()
     }
 
-    window.addEventListener('pwa-prompt-ready', onPromptReady)
+    // Listen for future prompt events
+    const onPrompt = () => maybeShowBanner()
+    window.addEventListener('pwa:prompt', onPrompt)
 
     // Detect successful install
-    window.addEventListener('appinstalled', () => {
-      console.log('[PWA] installed successfully')
+    const onInstalled = () => {
+      console.log('[PWA] appinstalled event fired ✓')
       setIsInstalled(true)
       setShowBanner(false)
-      _deferredPrompt = null
-    })
+      setHasPrompt(false)
+      window.__pwaPrompt = undefined
+    }
+    window.addEventListener('appinstalled', onInstalled)
 
     return () => {
-      window.removeEventListener('pwa-prompt-ready', onPromptReady)
+      window.removeEventListener('pwa:prompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current)
     }
   }, [router])
 
@@ -109,20 +124,31 @@ export default function PWAProvider() {
   }, [isInstalled, requestNotificationPermission])
 
   async function handleInstall() {
-    if (!_deferredPrompt) {
-      console.warn('[PWA] no deferred prompt available')
+    const prompt = window.__pwaPrompt
+    if (!prompt) {
+      console.warn('[PWA] no deferred prompt — cannot install')
       return
     }
-    setShowBanner(false)
-    const prompt = _deferredPrompt
-    _deferredPrompt = null
-    setHasPrompt(false)
 
-    await prompt.prompt()
-    const { outcome } = await prompt.userChoice
-    console.log('[PWA] install outcome:', outcome)
-    if (outcome === 'accepted') {
-      setTimeout(requestNotificationPermission, 2000)
+    // Clear immediately to prevent double-trigger
+    window.__pwaPrompt = undefined
+    setShowBanner(false)
+    setHasPrompt(false)
+    bannerShownRef.current = false
+
+    console.log('[PWA] triggering install prompt...')
+    try {
+      await prompt.prompt()
+      const { outcome } = await prompt.userChoice
+      console.log('[PWA] install outcome:', outcome)
+      if (outcome === 'accepted') {
+        setTimeout(requestNotificationPermission, 2000)
+      } else {
+        // User dismissed — don't show again for 1 day
+        localStorage.setItem(DISMISSED_UNTIL_KEY, String(Date.now() + 24 * 60 * 60 * 1000))
+      }
+    } catch (e) {
+      console.warn('[PWA] prompt() failed:', e)
     }
   }
 

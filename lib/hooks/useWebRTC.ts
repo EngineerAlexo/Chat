@@ -5,7 +5,7 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import { useCallStore } from '@/lib/stores/useCallStore'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-// ── STUN + TURN for better connectivity ───────────────────────────────────
+// ── ICE servers — multiple STUN for reliability ────────────────────────────
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -15,6 +15,8 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun4.l.google.com:19302' },
   ],
   iceCandidatePoolSize: 10,
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
 }
 
 function callChannelName(a: string, b: string) {
@@ -27,48 +29,103 @@ function log(...args: unknown[]) {
   console.log('[WebRTC]', new Date().toISOString().slice(11, 23), ...args)
 }
 
-// ── Ringing audio (base64 encoded short beep) ─────────────────────────────
-// Generated inline so no external file needed
-let _ringAudio: HTMLAudioElement | null = null
+// ── Ringing tone via Web Audio API ────────────────────────────────────────
+interface RingHandle { stop: () => void }
+let _ring: RingHandle | null = null
 
 function startRinging() {
+  if (_ring) return
   try {
-    if (_ringAudio) return
-    // Use Web Audio API to generate a ring tone — works under Android autoplay policy
-    // because it's triggered by a user gesture (incoming call notification)
-    const ctx = new (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!)()
-    let playing = true
+    const AudioCtx = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    let active = true
 
     const beep = () => {
-      if (!playing) return
+      if (!active) return
       const osc = ctx.createOscillator()
       const gain = ctx.createGain()
       osc.connect(gain)
       gain.connect(ctx.destination)
       osc.frequency.value = 440
       osc.type = 'sine'
-      gain.gain.setValueAtTime(0.3, ctx.currentTime)
+      gain.gain.setValueAtTime(0.25, ctx.currentTime)
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
       osc.start(ctx.currentTime)
       osc.stop(ctx.currentTime + 0.5)
-      setTimeout(() => { if (playing) beep() }, 1500)
+      setTimeout(() => { if (active) beep() }, 1500)
     }
 
     beep()
-    // Store stop function
-    ;(_ringAudio as unknown as { stop: () => void }) = { stop: () => { playing = false; ctx.close() } }
+    _ring = { stop: () => { active = false; ctx.close().catch(() => {}) } }
   } catch (e) {
-    log('ring audio error:', e)
+    log('ring error:', e)
   }
 }
 
 function stopRinging() {
+  _ring?.stop()
+  _ring = null
+}
+
+// ── High-quality media constraints ────────────────────────────────────────
+async function getMedia(type: 'audio' | 'video'): Promise<MediaStream> {
+  // Audio constraints — production quality
+  const audioConstraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  }
+
+  // Video constraints — 720p HD preferred, fallback to 480p
+  const videoConstraints: MediaTrackConstraints | false = type === 'video'
+    ? {
+        width:     { ideal: 1280, min: 640 },
+        height:    { ideal: 720,  min: 480 },
+        frameRate: { ideal: 30,   min: 15  },
+        facingMode: 'user',
+      }
+    : false
+
   try {
-    if (_ringAudio && typeof (_ringAudio as unknown as { stop?: () => void }).stop === 'function') {
-      ;(_ringAudio as unknown as { stop: () => void }).stop()
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: audioConstraints,
+      video: videoConstraints,
+    })
+    stream.getTracks().forEach((t) => {
+      t.enabled = true
+      log(`track acquired: ${t.kind} | label: ${t.label} | enabled: ${t.enabled}`)
+    })
+    return stream
+  } catch (err) {
+    log('getUserMedia failed:', err)
+    // Fallback: try with relaxed constraints
+    if (type === 'video') {
+      log('retrying with relaxed video constraints...')
+      const fallback = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
+        video: true,
+      })
+      fallback.getTracks().forEach((t) => { t.enabled = true })
+      return fallback
     }
-  } catch {}
-  _ringAudio = null
+    throw err
+  }
+}
+
+// ── Apply SDP bandwidth limits for quality control ────────────────────────
+function applyBandwidthToSdp(sdp: string, audioBps: number, videoBps: number): string {
+  // Set audio bitrate
+  sdp = sdp.replace(
+    /a=mid:audio\r\n/g,
+    `a=mid:audio\r\nb=AS:${Math.floor(audioBps / 1000)}\r\n`
+  )
+  // Set video bitrate
+  sdp = sdp.replace(
+    /a=mid:video\r\n/g,
+    `a=mid:video\r\nb=AS:${Math.floor(videoBps / 1000)}\r\n`
+  )
+  return sdp
 }
 
 export function useWebRTC(currentUserId: string) {
@@ -93,6 +150,7 @@ export function useWebRTC(currentUserId: string) {
     if (pc) {
       pc.onconnectionstatechange = null
       pc.oniceconnectionstatechange = null
+      pc.onsignalingstatechange = null
       pc.ontrack = null
       pc.onicecandidate = null
       pc.close()
@@ -127,6 +185,7 @@ export function useWebRTC(currentUserId: string) {
       const old = pcRef.current
       old.onconnectionstatechange = null
       old.oniceconnectionstatechange = null
+      old.onsignalingstatechange = null
       old.ontrack = null
       old.onicecandidate = null
       old.close()
@@ -138,12 +197,21 @@ export function useWebRTC(currentUserId: string) {
     const pc = new RTCPeerConnection(ICE_SERVERS)
     pcRef.current = pc
 
+    // ── ontrack: accumulate tracks into a single stream ──────────────────
+    // Using a Map to deduplicate tracks by kind — prevents partial stream overwrites
+    const trackMap = new Map<string, MediaStreamTrack>()
+
     pc.ontrack = (e) => {
-      log('ontrack — kind:', e.track.kind, 'streams:', e.streams.length, 'readyState:', e.track.readyState)
-      // Ensure track is enabled
+      log(`ontrack: kind=${e.track.kind} readyState=${e.track.readyState} streams=${e.streams.length}`)
       e.track.enabled = true
-      const stream = e.streams[0] ?? new MediaStream([e.track])
+
+      // Update track map
+      trackMap.set(e.track.kind, e.track)
+
+      // Build a complete stream from all received tracks
+      const stream = new MediaStream(Array.from(trackMap.values()))
       useCallStore.getState().setRemoteStream(stream)
+      log(`remote stream updated: ${stream.getTracks().map(t => t.kind).join(', ')}`)
     }
 
     pc.onconnectionstatechange = () => {
@@ -152,12 +220,15 @@ export function useWebRTC(currentUserId: string) {
         useCallStore.getState().setConnected()
       }
       if (pc.connectionState === 'failed') {
-        log('connection failed')
+        log('connection failed — cleaning up')
         cleanup()
       }
       if (pc.connectionState === 'disconnected') {
         setTimeout(() => {
-          if (pcRef.current?.connectionState === 'disconnected') cleanup()
+          if (pcRef.current?.connectionState === 'disconnected') {
+            log('still disconnected after 5s — cleaning up')
+            cleanup()
+          }
         }, 5000)
       }
     }
@@ -171,39 +242,6 @@ export function useWebRTC(currentUserId: string) {
     }
 
     return pc
-  }
-
-  // ── get user media with proper constraints for Android ─────────────────
-  async function getMedia(type: 'audio' | 'video'): Promise<MediaStream> {
-    const constraints: MediaStreamConstraints = {
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        // Android Chrome needs these explicit
-        sampleRate: 48000,
-        channelCount: 1,
-      },
-      video: type === 'video' ? {
-        width: { ideal: 640, max: 1280 },
-        height: { ideal: 480, max: 720 },
-        frameRate: { ideal: 24, max: 30 },
-        facingMode: 'user',
-      } : false,
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
-      // Ensure all tracks are enabled
-      stream.getTracks().forEach((t) => {
-        t.enabled = true
-        log('track acquired:', t.kind, 'enabled:', t.enabled, 'readyState:', t.readyState)
-      })
-      return stream
-    } catch (e) {
-      log('getUserMedia error:', e)
-      throw e
-    }
   }
 
   // ── join shared call channel ───────────────────────────────────────────
@@ -222,9 +260,9 @@ export function useWebRTC(currentUserId: string) {
 
     ch.on('broadcast', { event: 'call:answer' }, async ({ payload }) => {
       if (payload.from === userIdRef.current) return
-      log('received answer')
+      log('received answer from', payload.from)
       const pc = pcRef.current
-      if (!pc) return
+      if (!pc) { log('no PC for answer'); return }
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
         remoteReady.current = true
@@ -269,7 +307,7 @@ export function useWebRTC(currentUserId: string) {
     return ch
   }
 
-  // ── INITIATE CALL ──────────────────────────────────────────────────────
+  // ── INITIATE CALL (caller) ─────────────────────────────────────────────
   async function initiateCall(
     remoteId: string,
     remoteUsername: string,
@@ -277,33 +315,51 @@ export function useWebRTC(currentUserId: string) {
     convId: string,
     type: 'audio' | 'video',
   ) {
-    log('initiating', type, 'call to', remoteId)
+    log(`initiating ${type} call to ${remoteId}`)
 
+    // 1. Get media FIRST
     const stream = await getMedia(type)
     useCallStore.getState().setLocalStream(stream)
+    log('local stream ready:', stream.getTracks().map(t => `${t.kind}(${t.enabled})`))
 
+    // 2. Join signaling channel
     const ch = await joinCallChannel(remoteId)
 
+    // 3. Create PC and add ALL tracks before creating offer
     const pc = createPC()
-    stream.getTracks().forEach((t) => pc.addTrack(t, stream))
-    log('tracks added to PC:', stream.getTracks().map(t => `${t.kind}(${t.enabled})`))
+    stream.getTracks().forEach((t) => {
+      pc.addTrack(t, stream)
+      log(`addTrack: ${t.kind}`)
+    })
 
+    // 4. Wire ICE sending
     pc.onicecandidate = (e) => {
       if (!e.candidate) return
+      log('sending ICE candidate')
       ch.send({
         type: 'broadcast', event: 'call:ice',
         payload: { candidate: e.candidate.toJSON(), from: userIdRef.current },
       })
     }
 
+    // 5. Create offer with explicit receive directions
     const offer = await pc.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: type === 'video',
     })
-    await pc.setLocalDescription(offer)
-    log('offer created ✓')
 
-    // Ring receiver with embedded offer
+    // Apply bandwidth limits for quality
+    const sdpWithBw = applyBandwidthToSdp(
+      offer.sdp ?? '',
+      128_000,   // 128 kbps audio
+      2_000_000, // 2 Mbps video
+    )
+    const finalOffer: RTCSessionDescriptionInit = { type: offer.type, sdp: sdpWithBw }
+
+    await pc.setLocalDescription(finalOffer)
+    log('offer created and set ✓')
+
+    // 6. Ring receiver — embed offer SDP so they have it immediately on Accept
     const supabase = getSupabaseClient()
     const ringCh = supabase.channel(ringChannelName(remoteId))
     await new Promise<void>((resolve) => {
@@ -318,62 +374,84 @@ export function useWebRTC(currentUserId: string) {
         conversationId: convId,
         remoteUsername: useCallStore.getState().currentUserName ?? userIdRef.current,
         remoteAvatar: useCallStore.getState().currentUserAvatar ?? null,
-        offerSdp: offer,
+        offerSdp: finalOffer,
       },
     })
     supabase.removeChannel(ringCh)
     log('ring sent with embedded offer ✓')
   }
 
-  // ── ANSWER CALL ────────────────────────────────────────────────────────
+  // ── ANSWER CALL (callee) ───────────────────────────────────────────────
   async function answerCall(
     remoteId: string,
     convId: string,
     type: 'audio' | 'video',
   ) {
-    log('answerCall — remoteId:', remoteId, 'type:', type)
+    log(`answerCall: remoteId=${remoteId} type=${type}`)
     answeringRef.current = true
     stopRinging()
 
     try {
       const pendingOffer = useCallStore.getState().pendingOffer
       if (!pendingOffer) throw new Error('No pending offer')
-      log('pending offer found, type:', pendingOffer.type)
+      log('pending offer found, sdp type:', pendingOffer.type)
 
+      // 1. Get media FIRST — before creating PC
       const stream = await getMedia(type)
       useCallStore.getState().setLocalStream(stream)
+      log('local stream ready:', stream.getTracks().map(t => `${t.kind}(${t.enabled})`))
 
+      // 2. Join signaling channel
       const ch = await joinCallChannel(remoteId)
       log('call channel joined ✓')
 
+      // 3. Create PC and add ALL tracks before setRemoteDescription
       const pc = createPC()
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream))
-      log('tracks added:', stream.getTracks().map(t => `${t.kind}(${t.enabled})`))
+      stream.getTracks().forEach((t) => {
+        pc.addTrack(t, stream)
+        log(`addTrack: ${t.kind}`)
+      })
 
+      // 4. Wire ICE sending
       pc.onicecandidate = (e) => {
         if (!e.candidate) return
+        log('sending ICE candidate')
         ch.send({
           type: 'broadcast', event: 'call:ice',
           payload: { candidate: e.candidate.toJSON(), from: userIdRef.current },
         })
       }
 
+      // 5. setRemoteDescription FIRST (strict WebRTC order)
+      log('setRemoteDescription(offer)...')
       await pc.setRemoteDescription(new RTCSessionDescription(pendingOffer))
       remoteReady.current = true
       await drainIce(pc)
       log('remote description set ✓')
 
+      // 6. createAnswer
       const answer = await pc.createAnswer()
-      await pc.setLocalDescription(answer)
-      log('answer created ✓')
 
+      // Apply bandwidth limits
+      const sdpWithBw = applyBandwidthToSdp(
+        answer.sdp ?? '',
+        128_000,
+        2_000_000,
+      )
+      const finalAnswer: RTCSessionDescriptionInit = { type: answer.type, sdp: sdpWithBw }
+
+      await pc.setLocalDescription(finalAnswer)
+      log('answer created and set ✓')
+
+      // 7. Send answer
       await ch.send({
         type: 'broadcast', event: 'call:answer',
-        payload: { sdp: answer, from: userIdRef.current },
+        payload: { sdp: finalAnswer, from: userIdRef.current },
       })
       log('answer sent ✓')
 
       useCallStore.getState().clearPendingOffer()
+      log('answerCall complete ✓')
     } finally {
       answeringRef.current = false
     }
@@ -417,7 +495,7 @@ export function useWebRTC(currentUserId: string) {
 
     ch.on('broadcast', { event: 'call:incoming' }, ({ payload }) => {
       if (payload.from === currentUserId) return
-      log('incoming call from', payload.from, '| type:', payload.callType, '| offer:', !!payload.offerSdp)
+      log(`incoming call from ${payload.from} | type: ${payload.callType} | offer: ${!!payload.offerSdp}`)
 
       if (payload.offerSdp) {
         useCallStore.getState().setPendingOffer(payload.offerSdp)
@@ -431,7 +509,6 @@ export function useWebRTC(currentUserId: string) {
         conversationId: payload.conversationId,
       })
 
-      // Start ringing — triggered by incoming event (user interaction context)
       startRinging()
     })
 
