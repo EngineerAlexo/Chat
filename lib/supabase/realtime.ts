@@ -121,14 +121,14 @@ export function subscribeToConversation(conversationId: string) {
       const currentUser = useChatStore.getState().currentUser
       if (user_id === currentUser?.id) return
 
-      const current = useChatStore.getState().typingUsers[conversationId] ?? []
+      const current = useChatStore.getState().typingUsers?.[conversationId] ?? []
       const filtered = current.filter((u) => u.user_id !== user_id)
       useChatStore.getState().setTypingUsers(conversationId, [...filtered, { user_id, username, avatar_url }])
 
       // Clear after 3s
       if (typingTimers[user_id]) clearTimeout(typingTimers[user_id])
       typingTimers[user_id] = setTimeout(() => {
-        const curr = useChatStore.getState().typingUsers[conversationId] ?? []
+        const curr = useChatStore.getState().typingUsers?.[conversationId] ?? []
         useChatStore.getState().setTypingUsers(conversationId, curr.filter((u) => u.user_id !== user_id))
       }, 3000)
     })

@@ -20,7 +20,7 @@ export default function ChatHeader({ conversationId, currentUserId }: Props) {
   const [showEdit, setShowEdit] = useState(false)
 
   const conv = conversations.find((c) => c.id === conversationId)
-  const typing = typingUsers[conversationId] ?? []
+  const typing = typingUsers?.[conversationId] ?? []
 
   const { name, avatar, subtitle, isOnline, otherUserId, otherProfile, isAdmin } = useMemo(() => {
     if (!conv) return { name: '', avatar: null, subtitle: '', isOnline: false, otherUserId: null, otherProfile: null, isAdmin: false }

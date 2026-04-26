@@ -5,15 +5,29 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import { useCallStore } from '@/lib/stores/useCallStore'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
-// ── ICE servers — multiple STUN for reliability ────────────────────────────
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
+// Optional TURN (set in .env.local for strict NATs / mobile networks):
+// NEXT_PUBLIC_TURN_URL=turn:your.example.com:3478
+// NEXT_PUBLIC_TURN_USERNAME=user
+// NEXT_PUBLIC_TURN_CREDENTIAL=pass
+function buildIceServers(): RTCIceServer[] {
+  const base: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-  ],
+  ]
+  const turnUrl = typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_TURN_URL : undefined
+  if (turnUrl) {
+    base.push({
+      urls: turnUrl,
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME ?? '',
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '',
+    })
+  }
+  return base
+}
+
+const ICE_SERVERS: RTCConfiguration = {
+  iceServers: buildIceServers(),
   iceCandidatePoolSize: 10,
   bundlePolicy: 'max-bundle',
   rtcpMuxPolicy: 'require',
@@ -115,17 +129,20 @@ async function getMedia(type: 'audio' | 'video'): Promise<MediaStream> {
 
 // ── Apply SDP bandwidth limits for quality control ────────────────────────
 function applyBandwidthToSdp(sdp: string, audioBps: number, videoBps: number): string {
-  // Set audio bitrate
-  sdp = sdp.replace(
-    /a=mid:audio\r\n/g,
-    `a=mid:audio\r\nb=AS:${Math.floor(audioBps / 1000)}\r\n`
-  )
-  // Set video bitrate
-  sdp = sdp.replace(
-    /a=mid:video\r\n/g,
-    `a=mid:video\r\nb=AS:${Math.floor(videoBps / 1000)}\r\n`
-  )
-  return sdp
+  let out = sdp
+  if (/a=mid:audio\r\n/.test(out)) {
+    out = out.replace(
+      /a=mid:audio\r\n/g,
+      `a=mid:audio\r\nb=AS:${Math.floor(audioBps / 1000)}\r\n`
+    )
+  }
+  if (/a=mid:video\r\n/.test(out)) {
+    out = out.replace(
+      /a=mid:video\r\n/g,
+      `a=mid:video\r\nb=AS:${Math.floor(videoBps / 1000)}\r\n`
+    )
+  }
+  return out
 }
 
 export function useWebRTC(currentUserId: string) {

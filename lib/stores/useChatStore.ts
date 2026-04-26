@@ -133,7 +133,7 @@ export const useChatStore = create<ChatState>()(
 
     typingUsers: {},
     setTypingUsers: (convId, users) =>
-      set((s) => ({ typingUsers: { ...s.typingUsers, [convId]: users } })),
+      set((s) => ({ typingUsers: { ...(s.typingUsers ?? {}), [convId]: users } })),
 
     onlineUsers: new Set(),
     setOnlineUsers: (users) => set({ onlineUsers: users }),
@@ -162,9 +162,9 @@ export const useChatStore = create<ChatState>()(
 
     hasMore: {},
     setHasMore: (convId, has) =>
-      set((s) => ({ hasMore: { ...s.hasMore, [convId]: has } })),
+      set((s) => ({ hasMore: { ...(s.hasMore ?? {}), [convId]: has } })),
     loadingMore: {},
     setLoadingMore: (convId, loading) =>
-      set((s) => ({ loadingMore: { ...s.loadingMore, [convId]: loading } })),
+      set((s) => ({ loadingMore: { ...(s.loadingMore ?? {}), [convId]: loading } })),
   }))
 )

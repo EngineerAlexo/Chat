@@ -1,12 +1,16 @@
 'use client'
 
 import { useEffect, useCallback, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useChatStore } from '@/lib/stores/useChatStore'
+import type { Message } from '@/lib/types'
 import { subscribeToConversation } from '@/lib/supabase/realtime'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import ChatHeader from './ChatHeader'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
+
+const EMPTY_MESSAGES: Message[] = []
 
 interface Props {
   conversationId: string
@@ -14,13 +18,13 @@ interface Props {
 }
 
 export default function ChatWindow({ conversationId, currentUserId }: Props) {
-  // Read everything from store in one call — safe on SSR
-  const store = useChatStore()
-
-  // Safe reads with fallbacks — never crash even if store isn't hydrated
-  const convMessages  = (store.messages  && store.messages[conversationId])  ?? []
-  const hasMore       = (store.hasMore   && store.hasMore[conversationId])   ?? false
-  const isLoadingMore = (store.loadingMore && store.loadingMore[conversationId]) ?? false
+  const { convMessages, hasMore, isLoadingMore } = useChatStore(
+    useShallow((s) => ({
+      convMessages: s.messages?.[conversationId] ?? EMPTY_MESSAGES,
+      hasMore: s.hasMore?.[conversationId] ?? false,
+      isLoadingMore: s.loadingMore?.[conversationId] ?? false,
+    }))
+  )
 
   const [loading, setLoading] = useState(true)
   const didFetch = useRef(false)
@@ -29,7 +33,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
   useEffect(() => {
     didFetch.current = false
     const cached = useChatStore.getState().messages
-    setLoading(!cached || cached[conversationId] === undefined)
+    setLoading(!cached?.[conversationId])
   }, [conversationId])
 
   useEffect(() => {
@@ -41,7 +45,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
 
     // Already cached — show immediately
     const cached = useChatStore.getState().messages
-    if (cached && cached[conversationId] !== undefined) {
+    if (cached?.[conversationId] !== undefined) {
       setLoading(false)
       return () => useChatStore.getState().setActiveConversationId(null)
     }
@@ -113,6 +117,7 @@ export default function ChatWindow({ conversationId, currentUserId }: Props) {
           <MessageSkeleton />
         ) : (
           <MessageList
+            key={conversationId}
             conversationId={conversationId}
             messages={convMessages}
             currentUserId={currentUserId}

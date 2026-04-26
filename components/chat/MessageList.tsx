@@ -39,17 +39,18 @@ export default function MessageList({ conversationId, messages, currentUserId, o
   const flatItems = useMemo(() => {
     const groups = groupMessagesByDate(messages)
     const items: Array<
-      | { type: 'date'; label: string }
-      | { type: 'message'; message: Message; index: number; showAvatar: boolean; showName: boolean; isNew: boolean }
+      | { type: 'date'; key: string; label: string }
+      | { type: 'message'; key: string; message: Message; index: number; showAvatar: boolean; showName: boolean; isNew: boolean }
     > = []
     let idx = 0
     for (const group of groups) {
-      items.push({ type: 'date', label: group.date })
+      items.push({ type: 'date', key: `d:${group.date}`, label: group.date })
       for (const msg of group.messages) {
         const i = idx
         const isNew = !knownIdsRef.current.has(msg.id)
         items.push({
           type: 'message',
+          key: `m:${msg.id}`,
           message: msg,
           index: i,
           showAvatar: shouldShowAvatar(messages, i),
@@ -59,21 +60,24 @@ export default function MessageList({ conversationId, messages, currentUserId, o
         idx++
       }
     }
-    // After building, mark all current IDs as known
     messages.forEach((m) => knownIdsRef.current.add(m.id))
     return items
   }, [messages, currentUserId])
 
+  const flatItemsRef = useRef(flatItems)
+  flatItemsRef.current = flatItems
+
   const virtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => parentRef.current,
+    getItemKey: (index) => flatItemsRef.current[index]?.key ?? index,
     estimateSize: (i) => {
-      const item = flatItems[i]
+      const item = flatItemsRef.current[i]
       if (!item) return 60
       if (item.type === 'date') return 36
       return item.message.media_type ? 220 : 72
     },
-    overscan: 5,  // reduced from 8 — fewer off-screen renders
+    overscan: 8,
   })
 
   // Scroll to bottom on initial load — runs once per conversation
